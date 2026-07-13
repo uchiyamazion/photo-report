@@ -69,6 +69,8 @@ function doPost(e) {
   try {
     if (action === 'saveMaster') {
       return jsonOut_(saveMaster_(body));
+    } else if (action === 'updateMaster') {
+      return jsonOut_(updateMaster_(body));
     } else if (action === 'deleteMaster') {
       return jsonOut_(deleteMaster_(body));
     } else if (action === 'generateReport') {
@@ -161,6 +163,51 @@ function saveMaster_(body) {
 }
 
 /**
+ * 既存の1件を新しい内容に書き換える。
+ * body = {
+ *   type:'kata',    oldKata, oldSeizo, kata, seizo
+ *   type:'koji',    oldKoji, koji
+ *   type:'company', oldCompany1, oldCompany2, company1, company2
+ * }
+ */
+function updateMaster_(body) {
+  const ss = getMasterSheet_();
+
+  if (body.type === 'kata') {
+    if (!body.kata) throw new Error('型式が空です');
+    const sh = ss.getSheetByName('型式_製造番号');
+    const data = sh.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === body.oldKata && data[i][1] === (body.oldSeizo || '')) {
+        sh.getRange(i + 1, 1, 1, 2).setValues([[body.kata, body.seizo || '']]);
+        break;
+      }
+    }
+  } else if (body.type === 'koji') {
+    if (!body.koji) throw new Error('工事内容が空です');
+    const sh = ss.getSheetByName('工事内容');
+    const data = sh.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === body.oldKoji) {
+        sh.getRange(i + 1, 1).setValue(body.koji);
+        break;
+      }
+    }
+  } else if (body.type === 'company') {
+    if (!body.company1) throw new Error('会社名が空です');
+    const sh = ss.getSheetByName('宛先会社');
+    const data = sh.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === body.oldCompany1 && data[i][1] === (body.oldCompany2 || '')) {
+        sh.getRange(i + 1, 1, 1, 2).setValues([[body.company1, body.company2 || '']]);
+        break;
+      }
+    }
+  }
+  return { ok: true, data: getMasterData_() };
+}
+
+/**
  * body = { type: 'kata'|'koji', kata, seizo, koji }
  */
 function deleteMaster_(body) {
@@ -169,7 +216,7 @@ function deleteMaster_(body) {
     const sh = ss.getSheetByName('型式_製造番号');
     const data = sh.getDataRange().getValues();
     for (let i = data.length - 1; i >= 1; i--) {
-      if (data[i][0] === body.kata && (!body.seizo || data[i][1] === body.seizo)) {
+      if (data[i][0] === body.kata && data[i][1] === (body.seizo || '')) {
         sh.deleteRow(i + 1);
       }
     }

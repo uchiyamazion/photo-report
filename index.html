@@ -115,6 +115,10 @@
   .photo-remove{
     background:none; border:none; color:var(--danger); font-size:12px; cursor:pointer; padding:0;
   }
+  .edit-link{
+    background:none; border:none; color:var(--amber); font-size:12px; cursor:pointer; padding:0;
+  }
+  .master-actions{ display:flex; gap:12px; flex-shrink:0; }
 
   .empty{
     text-align:center; color:var(--paper-dim); font-size:13px; padding:22px 10px;
@@ -212,7 +216,10 @@
         <input type="text" id="newKata" placeholder="型式（例：PAC-XXX）">
         <input type="text" id="newSeizo" placeholder="製造番号（任意）">
       </div>
-      <button class="btn btn-amber btn-block" id="addKataBtn">登録</button>
+      <div class="add-row">
+        <button class="btn btn-amber btn-block" id="addKataBtn">登録</button>
+        <button class="btn btn-outline" id="cancelKataBtn" style="display:none;">キャンセル</button>
+      </div>
       <ul class="master-list" id="kataMasterList" style="margin-top:12px;"></ul>
     </div>
 
@@ -221,6 +228,7 @@
       <div class="add-row" style="margin-bottom:10px;">
         <input type="text" id="newKoji" placeholder="工事内容（例：室外機据付）">
         <button class="btn btn-amber" id="addKojiBtn">登録</button>
+        <button class="btn btn-outline" id="cancelKojiBtn" style="display:none;">キャンセル</button>
       </div>
       <ul class="master-list" id="kojiMasterList"></ul>
     </div>
@@ -233,7 +241,10 @@
       <div class="add-row" style="margin-bottom:10px;">
         <input type="text" id="newCompany2" placeholder="支店・部署（任意）">
       </div>
-      <button class="btn btn-amber btn-block" id="addCompanyBtn">登録</button>
+      <div class="add-row">
+        <button class="btn btn-amber btn-block" id="addCompanyBtn">登録</button>
+        <button class="btn btn-outline" id="cancelCompanyBtn" style="display:none;">キャンセル</button>
+      </div>
       <ul class="master-list" id="companyMasterList" style="margin-top:12px;"></ul>
     </div>
 
@@ -259,6 +270,9 @@ const JPEG_QUALITY = 0.75;
 /* ================= 状態 ================= */
 let master = { kataList: [], seizoByKata: {}, kojiList: [], companyList: [] };
 let photos = []; // { id, dataUrl, shotAt, place, kata, seizo, koji }
+let editingKata = null;    // { kata, seizo } 編集中の元の値
+let editingKoji = null;    // koji文字列（元の値）
+let editingCompany = null; // { company1, company2 } 編集中の元の値
 
 /* ================= 初期化 ================= */
 document.addEventListener('DOMContentLoaded', () => {
@@ -272,6 +286,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('addKataBtn').addEventListener('click', addKataMaster);
   document.getElementById('addKojiBtn').addEventListener('click', addKojiMaster);
   document.getElementById('addCompanyBtn').addEventListener('click', addCompanyMaster);
+  document.getElementById('cancelKataBtn').addEventListener('click', () => exitEditKata());
+  document.getElementById('cancelKojiBtn').addEventListener('click', () => exitEditKoji());
+  document.getElementById('cancelCompanyBtn').addEventListener('click', () => exitEditCompany());
 
   const today = new Date();
   document.getElementById('workDate').value = today.toISOString().slice(0,10);
@@ -307,6 +324,19 @@ async function loadMaster(){
   }
 }
 
+function appendKataRow(ul, kata, seizo){
+  const li = document.createElement('li');
+  li.innerHTML = `<div><div>${escapeHtml(kata)}</div>
+    <div class="master-sub">${escapeHtml(seizo) || '（製造番号未登録）'}</div></div>
+    <div class="master-actions">
+      <button class="edit-link">編集</button>
+      <button class="photo-remove">削除</button>
+    </div>`;
+  li.querySelector('.edit-link').addEventListener('click', () => enterEditKata(kata, seizo));
+  li.querySelector('.photo-remove').addEventListener('click', () => deleteKataMaster(kata, seizo));
+  ul.appendChild(li);
+}
+
 function renderMasterLists(){
   const kataUl = document.getElementById('kataMasterList');
   kataUl.innerHTML = '';
@@ -315,12 +345,11 @@ function renderMasterLists(){
   }
   master.kataList.forEach(kata => {
     const seizos = master.seizoByKata[kata] || [];
-    const li = document.createElement('li');
-    li.innerHTML = `<div><div>${escapeHtml(kata)}</div>
-      <div class="master-sub">${seizos.map(escapeHtml).join(' / ') || '（製造番号未登録）'}</div></div>
-      <button class="photo-remove" data-kata="${escapeHtml(kata)}">削除</button>`;
-    li.querySelector('button').addEventListener('click', () => deleteKataMaster(kata));
-    kataUl.appendChild(li);
+    if (seizos.length === 0){
+      appendKataRow(kataUl, kata, '');
+    } else {
+      seizos.forEach(seizo => appendKataRow(kataUl, kata, seizo));
+    }
   });
 
   const kojiUl = document.getElementById('kojiMasterList');
@@ -331,8 +360,12 @@ function renderMasterLists(){
   master.kojiList.forEach(koji => {
     const li = document.createElement('li');
     li.innerHTML = `<div>${escapeHtml(koji)}</div>
-      <button class="photo-remove" data-koji="${escapeHtml(koji)}">削除</button>`;
-    li.querySelector('button').addEventListener('click', () => deleteKojiMaster(koji));
+      <div class="master-actions">
+        <button class="edit-link">編集</button>
+        <button class="photo-remove">削除</button>
+      </div>`;
+    li.querySelector('.edit-link').addEventListener('click', () => enterEditKoji(koji));
+    li.querySelector('.photo-remove').addEventListener('click', () => deleteKojiMaster(koji));
     kojiUl.appendChild(li);
   });
 
@@ -345,8 +378,12 @@ function renderMasterLists(){
     const li = document.createElement('li');
     li.innerHTML = `<div><div>${escapeHtml(c.company1)}</div>
       <div class="master-sub">${escapeHtml(c.company2) || '（支店・部署未登録）'}</div></div>
-      <button class="photo-remove">削除</button>`;
-    li.querySelector('button').addEventListener('click', () => deleteCompanyMaster(c));
+      <div class="master-actions">
+        <button class="edit-link">編集</button>
+        <button class="photo-remove">削除</button>
+      </div>`;
+    li.querySelector('.edit-link').addEventListener('click', () => enterEditCompany(c));
+    li.querySelector('.photo-remove').addEventListener('click', () => deleteCompanyMaster(c));
     companyUl.appendChild(li);
   });
   renderCompanySelect();
@@ -369,30 +406,75 @@ async function addKataMaster(){
   const kata = document.getElementById('newKata').value.trim();
   const seizo = document.getElementById('newSeizo').value.trim();
   if (!kata){ toast('型式を入力してください'); return; }
-  const res = await postGas({ action:'saveMaster', type:'kata', kata, seizo });
+
+  const body = editingKata
+    ? { action:'updateMaster', type:'kata', oldKata: editingKata.kata, oldSeizo: editingKata.seizo, kata, seizo }
+    : { action:'saveMaster', type:'kata', kata, seizo };
+
+  const res = await postGas(body);
   if (res.ok){
     master = res.data;
-    document.getElementById('newKata').value = '';
-    document.getElementById('newSeizo').value = '';
+    exitEditKata();
     renderMasterLists();
+  } else {
+    toast('保存に失敗しました: ' + (res.error || ''));
   }
 }
 
-async function deleteKataMaster(kata){
-  if (!confirm(kata + ' を削除しますか？')) return;
-  const res = await postGas({ action:'deleteMaster', type:'kata', kata });
+function enterEditKata(kata, seizo){
+  editingKata = { kata, seizo };
+  document.getElementById('newKata').value = kata;
+  document.getElementById('newSeizo').value = seizo;
+  document.getElementById('addKataBtn').textContent = '更新';
+  document.getElementById('cancelKataBtn').style.display = '';
+  document.getElementById('newKata').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+function exitEditKata(){
+  editingKata = null;
+  document.getElementById('newKata').value = '';
+  document.getElementById('newSeizo').value = '';
+  document.getElementById('addKataBtn').textContent = '登録';
+  document.getElementById('cancelKataBtn').style.display = 'none';
+}
+
+async function deleteKataMaster(kata, seizo){
+  if (!confirm((kata + (seizo ? ' / ' + seizo : '')) + ' を削除しますか？')) return;
+  const res = await postGas({ action:'deleteMaster', type:'kata', kata, seizo });
   if (res.ok){ master = res.data; renderMasterLists(); }
 }
 
 async function addKojiMaster(){
   const koji = document.getElementById('newKoji').value.trim();
   if (!koji){ toast('工事内容を入力してください'); return; }
-  const res = await postGas({ action:'saveMaster', type:'koji', koji });
+
+  const body = editingKoji
+    ? { action:'updateMaster', type:'koji', oldKoji: editingKoji, koji }
+    : { action:'saveMaster', type:'koji', koji };
+
+  const res = await postGas(body);
   if (res.ok){
     master = res.data;
-    document.getElementById('newKoji').value = '';
+    exitEditKoji();
     renderMasterLists();
+  } else {
+    toast('保存に失敗しました: ' + (res.error || ''));
   }
+}
+
+function enterEditKoji(koji){
+  editingKoji = koji;
+  document.getElementById('newKoji').value = koji;
+  document.getElementById('addKojiBtn').textContent = '更新';
+  document.getElementById('cancelKojiBtn').style.display = '';
+  document.getElementById('newKoji').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+function exitEditKoji(){
+  editingKoji = null;
+  document.getElementById('newKoji').value = '';
+  document.getElementById('addKojiBtn').textContent = '登録';
+  document.getElementById('cancelKojiBtn').style.display = 'none';
 }
 
 async function deleteKojiMaster(koji){
@@ -405,13 +487,36 @@ async function addCompanyMaster(){
   const company1 = document.getElementById('newCompany1').value.trim();
   const company2 = document.getElementById('newCompany2').value.trim();
   if (!company1){ toast('会社名を入力してください'); return; }
-  const res = await postGas({ action:'saveMaster', type:'company', company1, company2 });
+
+  const body = editingCompany
+    ? { action:'updateMaster', type:'company', oldCompany1: editingCompany.company1, oldCompany2: editingCompany.company2, company1, company2 }
+    : { action:'saveMaster', type:'company', company1, company2 };
+
+  const res = await postGas(body);
   if (res.ok){
     master = res.data;
-    document.getElementById('newCompany1').value = '';
-    document.getElementById('newCompany2').value = '';
+    exitEditCompany();
     renderMasterLists();
+  } else {
+    toast('保存に失敗しました: ' + (res.error || ''));
   }
+}
+
+function enterEditCompany(c){
+  editingCompany = { company1: c.company1, company2: c.company2 };
+  document.getElementById('newCompany1').value = c.company1;
+  document.getElementById('newCompany2').value = c.company2;
+  document.getElementById('addCompanyBtn').textContent = '更新';
+  document.getElementById('cancelCompanyBtn').style.display = '';
+  document.getElementById('newCompany1').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+function exitEditCompany(){
+  editingCompany = null;
+  document.getElementById('newCompany1').value = '';
+  document.getElementById('newCompany2').value = '';
+  document.getElementById('addCompanyBtn').textContent = '登録';
+  document.getElementById('cancelCompanyBtn').style.display = 'none';
 }
 
 async function deleteCompanyMaster(c){
