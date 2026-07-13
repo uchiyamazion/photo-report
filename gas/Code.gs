@@ -413,7 +413,7 @@ function buildPhotoSheet_(ss, sheetName, photos) {
  * Excelの文字幅単位に変換されるため、変換誤差でセル幅がわずかに縮む。
  * そのため、計算上のセル幅・高さに安全マージンをかけてから画像サイズを決める。
  */
-const IMAGE_FIT_MARGIN = 0.96;
+const IMAGE_FIT_MARGIN = 0.99;
 
 function insertPhotoIntoRange_(sheet, dataUrl, targetRange) {
   const blob = dataUrlToBlob_(dataUrl);
