@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>写真報告書作成アプリ</title>
+<style>
+  :root{
+    --steel-900:#101b26;
+    --steel-800:#16232f;
+    --steel-700:#1f3140;
+    --steel-600:#2c4658;
+    --steel-500:#41647c;
+    --line:#33495a;
+    --paper:#eef2f0;
+    --paper-dim:#c9d3ce;
+    --amber:#e8a13c;
+    --amber-dim:#7a5a24;
+    --danger:#c85a4a;
+    --ok:#5ba97c;
+    --radius:10px;
+    font-size:16px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--steel-900);
+    color:var(--paper);
+    font-family:"Hiragino Sans","Yu Gothic",system-ui,sans-serif;
+    min-height:100vh;
+    padding-bottom:72px;
+  }
+  header{
+    position:sticky; top:0; z-index:20;
+    background:linear-gradient(180deg,var(--steel-800),var(--steel-800) 90%,transparent);
+    padding:14px 16px 10px;
+    border-bottom:1px solid var(--line);
+  }
+  .brand{
+    display:flex; align-items:baseline; gap:8px;
+  }
+  .brand .mark{
+    font-family:"Courier New",monospace;
+    font-size:12px; letter-spacing:.12em;
+    color:var(--amber);
+    border:1px solid var(--amber-dim);
+    padding:2px 6px; border-radius:4px;
+  }
+  .brand h1{
+    font-size:18px; margin:0; font-weight:700; letter-spacing:.02em;
+  }
+  nav.tabs{
+    display:flex; gap:0; margin-top:12px;
+    border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;
+  }
+  nav.tabs button{
+    flex:1; padding:10px 8px; background:var(--steel-800); color:var(--paper-dim);
+    border:none; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  nav.tabs button.active{
+    background:var(--steel-600); color:#fff;
+  }
+  main{ padding:16px; max-width:640px; margin:0 auto; }
+  section{ display:none; }
+  section.active{ display:block; }
+
+  .card{
+    background:var(--steel-800); border:1px solid var(--line);
+    border-radius:var(--radius); padding:14px; margin-bottom:14px;
+  }
+  .card h2{
+    font-size:13px; margin:0 0 10px; color:var(--amber);
+    letter-spacing:.08em; text-transform:uppercase; font-weight:700;
+  }
+  label.field{ display:block; margin-bottom:10px; }
+  label.field span{
+    display:block; font-size:12px; color:var(--paper-dim); margin-bottom:4px;
+  }
+  input[type=text], input[type=date], input[type=datetime-local], select, textarea{
+    width:100%; padding:10px 10px; background:var(--steel-900);
+    border:1px solid var(--line); border-radius:8px; color:#fff; font-size:15px;
+  }
+  textarea{ resize:vertical; min-height:56px; }
+  input::placeholder{ color:#5a7182; }
+
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    padding:11px 16px; border-radius:8px; border:none;
+    font-size:14px; font-weight:700; cursor:pointer;
+  }
+  .btn-amber{ background:var(--amber); color:#241a06; }
+  .btn-outline{ background:transparent; color:var(--paper); border:1px solid var(--steel-500); }
+  .btn-danger{ background:transparent; color:var(--danger); border:1px solid var(--danger); }
+  .btn-block{ width:100%; }
+  .btn:disabled{ opacity:.5; }
+
+  .photo-item{
+    display:flex; gap:10px; border:1px solid var(--line); border-radius:var(--radius);
+    padding:10px; margin-bottom:10px; background:var(--steel-700);
+  }
+  .photo-thumb{
+    width:88px; height:88px; border-radius:6px; background:var(--steel-900);
+    background-size:cover; background-position:center; flex-shrink:0;
+    border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center;
+    color:var(--paper-dim); font-size:11px; text-align:center;
+  }
+  .photo-fields{ flex:1; min-width:0; }
+  .photo-fields .row{ display:flex; gap:6px; margin-bottom:6px; }
+  .photo-fields select, .photo-fields input{ font-size:13px; padding:7px 8px; }
+  .photo-index{
+    font-family:"Courier New",monospace; font-size:11px; color:var(--amber);
+    margin-bottom:4px;
+  }
+  .photo-remove{
+    background:none; border:none; color:var(--danger); font-size:12px; cursor:pointer; padding:0;
+  }
+
+  .empty{
+    text-align:center; color:var(--paper-dim); font-size:13px; padding:22px 10px;
+    border:1px dashed var(--steel-500); border-radius:var(--radius);
+  }
+
+  .fab{
+    position:fixed; left:0; right:0; bottom:0; z-index:30;
+    padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+    background:linear-gradient(0deg,var(--steel-900) 60%,transparent);
+  }
+  .fab-inner{ max-width:640px; margin:0 auto; display:flex; gap:8px; }
+
+  .master-list{ list-style:none; margin:0; padding:0; }
+  .master-list li{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:9px 0; border-bottom:1px solid var(--line); font-size:14px;
+  }
+  .master-list li:last-child{ border-bottom:none; }
+  .master-sub{ color:var(--paper-dim); font-size:12px; }
+
+  .toast{
+    position:fixed; top:14px; left:50%; transform:translateX(-50%);
+    background:var(--steel-600); border:1px solid var(--amber);
+    color:#fff; padding:10px 16px; border-radius:8px; font-size:13px;
+    z-index:99; max-width:90vw; text-align:center;
+  }
+  .result-box{
+    border:1px solid var(--ok); background:rgba(91,169,124,.12);
+    border-radius:var(--radius); padding:14px; margin-top:14px;
+  }
+  .result-box a{ color:var(--ok); font-weight:700; word-break:break-all; }
+
+  .add-row{ display:flex; gap:8px; }
+  .add-row > *{ flex:1; }
+  .add-row .btn{ flex:0 0 auto; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <span class="mark">SION</span>
+    <h1>写真報告書作成</h1>
+  </div>
+  <nav class="tabs">
+    <button data-tab="new" class="active">新規作成</button>
+    <button data-tab="master">マスタ管理</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ============ 新規作成 ============ -->
+  <section id="tab-new" class="active">
+
+    <div class="card">
+      <h2>現場情報</h2>
+      <label class="field">
+        <span>物件名</span>
+        <input type="text" id="siteName" placeholder="例）〇〇ビル空調更新工事">
+      </label>
+      <label class="field">
+        <span>作業内容</span>
+        <input type="text" id="workContent" placeholder="例）室外機交換工事">
+      </label>
+      <label class="field">
+        <span>作業日</span>
+        <input type="date" id="workDate">
+      </label>
+      <label class="field">
+        <span>宛先会社</span>
+        <select id="companySelect"></select>
+      </label>
+    </div>
+
+    <div class="card">
+      <h2>写真（<span id="photoCount">0</span>枚）</h2>
+      <div id="photoList"></div>
+      <div class="empty" id="photoEmpty">まだ写真がありません。下の「写真を追加」から撮影してください。</div>
+
+      <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none">
+      <button class="btn btn-outline btn-block" id="addPhotoBtn" style="margin-top:8px;">＋ 写真を追加</button>
+    </div>
+
+    <div id="resultArea"></div>
+  </section>
+
+  <!-- ============ マスタ管理 ============ -->
+  <section id="tab-master">
+
+    <div class="card">
+      <h2>型式 ／ 製造番号</h2>
+      <div class="add-row" style="margin-bottom:10px;">
+        <input type="text" id="newKata" placeholder="型式（例：PAC-XXX）">
+        <input type="text" id="newSeizo" placeholder="製造番号（任意）">
+      </div>
+      <button class="btn btn-amber btn-block" id="addKataBtn">登録</button>
+      <ul class="master-list" id="kataMasterList" style="margin-top:12px;"></ul>
+    </div>
+
+    <div class="card">
+      <h2>工事内容</h2>
+      <div class="add-row" style="margin-bottom:10px;">
+        <input type="text" id="newKoji" placeholder="工事内容（例：室外機据付）">
+        <button class="btn btn-amber" id="addKojiBtn">登録</button>
+      </div>
+      <ul class="master-list" id="kojiMasterList"></ul>
+    </div>
+
+    <div class="card">
+      <h2>宛先会社（表紙に印字）</h2>
+      <div class="add-row" style="margin-bottom:10px;">
+        <input type="text" id="newCompany1" placeholder="会社名（例：〇〇株式会社）">
+      </div>
+      <div class="add-row" style="margin-bottom:10px;">
+        <input type="text" id="newCompany2" placeholder="支店・部署（任意）">
+      </div>
+      <button class="btn btn-amber btn-block" id="addCompanyBtn">登録</button>
+      <ul class="master-list" id="companyMasterList" style="margin-top:12px;"></ul>
+    </div>
+
+  </section>
+
+</main>
+
+<div class="fab" id="fabNew">
+  <div class="fab-inner">
+    <button class="btn btn-outline" id="resetBtn">クリア</button>
+    <button class="btn btn-amber btn-block" id="submitBtn">Excelを作成</button>
+  </div>
+</div>
+
+<script>
+/* ================= 設定 ================= */
+// ★ GASをウェブアプリとしてデプロイした後、発行されたURLをここに設定してください
+const GAS_URL = 'https://script.google.com/macros/s/【ここにデプロイIDを貼り付け】/exec';
+
+const MAX_IMAGE_DIMENSION = 1600; // 送信前に長辺をこのpx以下にリサイズ
+const JPEG_QUALITY = 0.75;
+
+/* ================= 状態 ================= */
+let master = { kataList: [], seizoByKata: {}, kojiList: [], companyList: [] };
+let photos = []; // { id, dataUrl, shotAt, place, kata, seizo, koji }
+
+/* ================= 初期化 ================= */
+document.addEventListener('DOMContentLoaded', () => {
+  initTabs();
+  document.getElementById('addPhotoBtn').addEventListener('click', () => {
+    document.getElementById('cameraInput').click();
+  });
+  document.getElementById('cameraInput').addEventListener('change', onPickPhoto);
+  document.getElementById('submitBtn').addEventListener('click', submitReport);
+  document.getElementById('resetBtn').addEventListener('click', resetForm);
+  document.getElementById('addKataBtn').addEventListener('click', addKataMaster);
+  document.getElementById('addKojiBtn').addEventListener('click', addKojiMaster);
+  document.getElementById('addCompanyBtn').addEventListener('click', addCompanyMaster);
+
+  const today = new Date();
+  document.getElementById('workDate').value = today.toISOString().slice(0,10);
+
+  loadMaster();
+  renderPhotoList();
+});
+
+function initTabs(){
+  document.querySelectorAll('nav.tabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('main section').forEach(s => s.classList.remove('active'));
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      document.getElementById('fabNew').style.display = btn.dataset.tab === 'new' ? 'block' : 'none';
+    });
+  });
+}
+
+/* ================= マスタ読み込み ================= */
+async function loadMaster(){
+  try{
+    const res = await fetch(GAS_URL + '?action=master');
+    const data = await res.json();
+    if (data.ok){
+      master = data;
+      renderMasterLists();
+    }
+  }catch(err){
+    console.error(err);
+    toast('マスタデータの取得に失敗しました。GAS_URLの設定を確認してください。');
+  }
+}
+
+function renderMasterLists(){
+  const kataUl = document.getElementById('kataMasterList');
+  kataUl.innerHTML = '';
+  if (master.kataList.length === 0){
+    kataUl.innerHTML = '<li class="master-sub">まだ登録がありません</li>';
+  }
+  master.kataList.forEach(kata => {
+    const seizos = master.seizoByKata[kata] || [];
+    const li = document.createElement('li');
+    li.innerHTML = `<div><div>${escapeHtml(kata)}</div>
+      <div class="master-sub">${seizos.map(escapeHtml).join(' / ') || '（製造番号未登録）'}</div></div>
+      <button class="photo-remove" data-kata="${escapeHtml(kata)}">削除</button>`;
+    li.querySelector('button').addEventListener('click', () => deleteKataMaster(kata));
+    kataUl.appendChild(li);
+  });
+
+  const kojiUl = document.getElementById('kojiMasterList');
+  kojiUl.innerHTML = '';
+  if (master.kojiList.length === 0){
+    kojiUl.innerHTML = '<li class="master-sub">まだ登録がありません</li>';
+  }
+  master.kojiList.forEach(koji => {
+    const li = document.createElement('li');
+    li.innerHTML = `<div>${escapeHtml(koji)}</div>
+      <button class="photo-remove" data-koji="${escapeHtml(koji)}">削除</button>`;
+    li.querySelector('button').addEventListener('click', () => deleteKojiMaster(koji));
+    kojiUl.appendChild(li);
+  });
+
+  const companyUl = document.getElementById('companyMasterList');
+  companyUl.innerHTML = '';
+  if (master.companyList.length === 0){
+    companyUl.innerHTML = '<li class="master-sub">まだ登録がありません</li>';
+  }
+  master.companyList.forEach(c => {
+    const li = document.createElement('li');
+    li.innerHTML = `<div><div>${escapeHtml(c.company1)}</div>
+      <div class="master-sub">${escapeHtml(c.company2) || '（支店・部署未登録）'}</div></div>
+      <button class="photo-remove">削除</button>`;
+    li.querySelector('button').addEventListener('click', () => deleteCompanyMaster(c));
+    companyUl.appendChild(li);
+  });
+  renderCompanySelect();
+
+  // 写真フォームのプルダウンも更新
+  renderPhotoList();
+}
+
+function renderCompanySelect(){
+  const sel = document.getElementById('companySelect');
+  const prevValue = sel.value;
+  sel.innerHTML = '<option value="">選択してください</option>' +
+    master.companyList.map((c, i) =>
+      `<option value="${i}">${escapeHtml(c.company1)}${c.company2 ? '　' + escapeHtml(c.company2) : ''}</option>`
+    ).join('');
+  if (prevValue && Number(prevValue) < master.companyList.length) sel.value = prevValue;
+}
+
+async function addKataMaster(){
+  const kata = document.getElementById('newKata').value.trim();
+  const seizo = document.getElementById('newSeizo').value.trim();
+  if (!kata){ toast('型式を入力してください'); return; }
+  const res = await postGas({ action:'saveMaster', type:'kata', kata, seizo });
+  if (res.ok){
+    master = res.data;
+    document.getElementById('newKata').value = '';
+    document.getElementById('newSeizo').value = '';
+    renderMasterLists();
+  }
+}
+
+async function deleteKataMaster(kata){
+  if (!confirm(kata + ' を削除しますか？')) return;
+  const res = await postGas({ action:'deleteMaster', type:'kata', kata });
+  if (res.ok){ master = res.data; renderMasterLists(); }
+}
+
+async function addKojiMaster(){
+  const koji = document.getElementById('newKoji').value.trim();
+  if (!koji){ toast('工事内容を入力してください'); return; }
+  const res = await postGas({ action:'saveMaster', type:'koji', koji });
+  if (res.ok){
+    master = res.data;
+    document.getElementById('newKoji').value = '';
+    renderMasterLists();
+  }
+}
+
+async function deleteKojiMaster(koji){
+  if (!confirm(koji + ' を削除しますか？')) return;
+  const res = await postGas({ action:'deleteMaster', type:'koji', koji });
+  if (res.ok){ master = res.data; renderMasterLists(); }
+}
+
+async function addCompanyMaster(){
+  const company1 = document.getElementById('newCompany1').value.trim();
+  const company2 = document.getElementById('newCompany2').value.trim();
+  if (!company1){ toast('会社名を入力してください'); return; }
+  const res = await postGas({ action:'saveMaster', type:'company', company1, company2 });
+  if (res.ok){
+    master = res.data;
+    document.getElementById('newCompany1').value = '';
+    document.getElementById('newCompany2').value = '';
+    renderMasterLists();
+  }
+}
+
+async function deleteCompanyMaster(c){
+  if (!confirm(c.company1 + ' を削除しますか？')) return;
+  const res = await postGas({ action:'deleteMaster', type:'company', company1:c.company1, company2:c.company2 });
+  if (res.ok){ master = res.data; renderMasterLists(); }
+}
+
+/* ================= 写真 ================= */
+function onPickPhoto(e){
+  const file = e.target.files[0];
+  if (!file) return;
+  resizeImage(file, MAX_IMAGE_DIMENSION, JPEG_QUALITY).then(dataUrl => {
+    const now = new Date();
+    photos.push({
+      id: 'p' + Date.now() + Math.random().toString(16).slice(2),
+      dataUrl,
+      shotAt: formatDateTimeLocal(now),
+      place: '',
+      kata: '',
+      seizo: '',
+      koji: ''
+    });
+    renderPhotoList();
+    e.target.value = '';
+  });
+}
+
+function resizeImage(file, maxDim, quality){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => { img.src = reader.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim){
+        if (width >= height){ height = Math.round(height * maxDim / width); width = maxDim; }
+        else { width = Math.round(width * maxDim / height); height = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderPhotoList(){
+  const list = document.getElementById('photoList');
+  const empty = document.getElementById('photoEmpty');
+  document.getElementById('photoCount').textContent = photos.length;
+  list.innerHTML = '';
+  empty.style.display = photos.length === 0 ? 'block' : 'none';
+
+  photos.forEach((p, idx) => {
+    const div = document.createElement('div');
+    div.className = 'photo-item';
+
+    const kataOptions = ['<option value="">型式選択</option>']
+      .concat(master.kataList.map(k => `<option value="${escapeHtml(k)}" ${p.kata===k?'selected':''}>${escapeHtml(k)}</option>`)).join('');
+
+    const seizoList = master.seizoByKata[p.kata] || [];
+    const seizoOptions = ['<option value="">製造番号選択</option>']
+      .concat(seizoList.map(s => `<option value="${escapeHtml(s)}" ${p.seizo===s?'selected':''}>${escapeHtml(s)}</option>`)).join('');
+
+    const kojiOptions = ['<option value="">工事内容選択</option>']
+      .concat(master.kojiList.map(k => `<option value="${escapeHtml(k)}" ${p.koji===k?'selected':''}>${escapeHtml(k)}</option>`)).join('');
+
+    div.innerHTML = `
+      <div class="photo-thumb" style="background-image:url('${p.dataUrl}')"></div>
+      <div class="photo-fields">
+        <div class="photo-index">写真 ${idx + 1} <button class="photo-remove" style="float:right;">削除</button></div>
+        <div class="row">
+          <input type="datetime-local" class="f-shotAt" value="${p.shotAt}">
+        </div>
+        <div class="row">
+          <input type="text" class="f-place" placeholder="撮影場所" value="${escapeHtml(p.place)}">
+        </div>
+        <div class="row">
+          <select class="f-kata">${kataOptions}</select>
+          <select class="f-seizo">${seizoOptions}</select>
+        </div>
+        <div class="row">
+          <select class="f-koji">${kojiOptions}</select>
+        </div>
+      </div>
+    `;
+
+    div.querySelector('.photo-remove').addEventListener('click', () => {
+      photos = photos.filter(x => x.id !== p.id);
+      renderPhotoList();
+    });
+    div.querySelector('.f-shotAt').addEventListener('change', e => p.shotAt = e.target.value);
+    div.querySelector('.f-place').addEventListener('input', e => p.place = e.target.value);
+    div.querySelector('.f-kata').addEventListener('change', e => { p.kata = e.target.value; p.seizo=''; renderPhotoList(); });
+    div.querySelector('.f-seizo').addEventListener('change', e => p.seizo = e.target.value);
+    div.querySelector('.f-koji').addEventListener('change', e => p.koji = e.target.value);
+
+    list.appendChild(div);
+  });
+}
+
+/* ================= 送信 ================= */
+async function submitReport(){
+  const siteName = document.getElementById('siteName').value.trim();
+  const workContent = document.getElementById('workContent').value.trim();
+  const workDate = document.getElementById('workDate').value;
+
+  if (photos.length === 0){ toast('写真を1枚以上追加してください'); return; }
+
+  const companyIdx = document.getElementById('companySelect').value;
+  const company = companyIdx !== '' ? master.companyList[Number(companyIdx)] : null;
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = '作成中…';
+
+  const payload = {
+    action: 'generateReport',
+    siteName, workContent, workDate,
+    companyLine1: company ? company.company1 : '',
+    companyLine2: company ? company.company2 : '',
+    photos: photos.map(p => ({
+      dataUrl: p.dataUrl,
+      shotAt: p.shotAt ? p.shotAt.replace('T', ' ') : '',
+      place: p.place, kata: p.kata, seizo: p.seizo, koji: p.koji
+    }))
+  };
+
+  try{
+    const res = await postGas(payload);
+    if (res.ok){
+      document.getElementById('resultArea').innerHTML = `
+        <div class="result-box">
+          報告書を作成しました。<br>
+          <a href="${res.downloadUrl}" target="_blank">Excel(.xlsx)をダウンロード</a><br>
+          <a href="${res.spreadsheetUrl}" target="_blank">Googleスプレッドシートで開く</a>
+        </div>`;
+    } else {
+      toast('作成に失敗しました: ' + (res.error || '不明なエラー'));
+    }
+  }catch(err){
+    console.error(err);
+    toast('通信に失敗しました。GAS_URLの設定・公開範囲を確認してください。');
+  }finally{
+    btn.disabled = false;
+    btn.textContent = 'Excelを作成';
+  }
+}
+
+function resetForm(){
+  if (photos.length && !confirm('入力内容をクリアしますか？')) return;
+  photos = [];
+  document.getElementById('siteName').value = '';
+  document.getElementById('workContent').value = '';
+  document.getElementById('resultArea').innerHTML = '';
+  renderPhotoList();
+}
+
+/* ================= 共通 ================= */
+async function postGas(body){
+  const res = await fetch(GAS_URL, {
+    method: 'POST',
+    body: JSON.stringify(body) // text/plain送信でCORSプリフライトを回避
+  });
+  return res.json();
+}
+
+function formatDateTimeLocal(d){
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function escapeHtml(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+let toastTimer;
+function toast(msg){
+  let el = document.querySelector('.toast');
+  if (!el){
+    el = document.createElement('div');
+    el.className = 'toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.remove(), 3200);
+}
+</script>
+</body>
+</html>
