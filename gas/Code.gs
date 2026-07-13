@@ -284,25 +284,52 @@ function generateReport_(body) {
 function buildCoverSheet_(ss, body) {
   const sheet = ss.getSheets()[0];
   sheet.setName('表紙');
-  sheet.setColumnWidth(1, 20);
 
-  sheet.getRange('E7').setValue('完 了 写 真').setFontWeight('bold').setFontSize(20)
-    .setHorizontalAlignment('center');
+  // 列幅（元xlsmのA/B/G/H/L列幅を再現。他は既定幅のまま）
+  sheet.setColumnWidth(1, 32);  // A
+  sheet.setColumnWidth(2, 64);  // B
+  sheet.setColumnWidth(7, 23);  // G
+  sheet.setColumnWidth(8, 64);  // H
+  sheet.setColumnWidth(12, 34); // L
 
-  sheet.getRange('C13').setValue('物件名：');
-  sheet.getRange('E13').setValue(body.siteName || '');
-  sheet.getRange('J13').setValue('様');
+  // 行高（元xlsmに合わせる。7行目のみタイトル用に高め）
+  sheet.setRowHeight(1, 18);
+  for (let r = 2; r <= 33; r++) sheet.setRowHeight(r, r === 7 ? 46 : 31);
 
-  sheet.getRange('C15').setValue('作業内容：');
-  sheet.getRange('E15').setValue(body.workContent || '');
+  const FONT = 'HGP創英ﾌﾟﾚｾﾞﾝｽEB';
 
-  sheet.getRange('C17').setValue('作業日：');
-  sheet.getRange('E17').setValue(body.workDate || '');
+  // タイトル「完 了 写 真」
+  const title = sheet.getRange('E7:H7');
+  title.merge();
+  title.setValue('完 了 写 真')
+    .setFontFamily(FONT).setFontSize(24)
+    .setHorizontalAlignment('center').setVerticalAlignment('middle')
+    .setBorder(true, true, true, true, false, false);
 
-  sheet.getRange('D26').setValue(body.companyLine1 || '');
-  sheet.getRange('D27').setValue(body.companyLine2 || '');
+  // 物件名／様
+  sheet.getRange('C13:D13').merge().setValue('物件名：')
+    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('right');
+  sheet.getRange('E13:I13').merge().setValue(body.siteName || '')
+    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('left');
+  sheet.getRange('J13').setValue('様').setFontFamily(FONT).setFontSize(16);
 
-  sheet.getRange('A1:K33').setFontFamily('MS PGothic');
+  // 作業内容
+  sheet.getRange('C15:D15').merge().setValue('作業内容：')
+    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('right').setVerticalAlignment('middle');
+  sheet.getRange('E15:J15').merge().setValue(body.workContent || '')
+    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('left').setVerticalAlignment('middle');
+
+  // 作業日
+  sheet.getRange('C17:D17').merge().setValue('作業日：')
+    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('right').setVerticalAlignment('middle');
+  sheet.getRange('E17:J17').merge().setValue(body.workDate || '')
+    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('left').setVerticalAlignment('middle');
+
+  // 宛先会社（2行）
+  sheet.getRange('D26:I26').merge().setValue(body.companyLine1 || '')
+    .setFontFamily(FONT).setFontSize(14).setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sheet.getRange('D27:I27').merge().setValue(body.companyLine2 || '')
+    .setFontFamily(FONT).setFontSize(14).setHorizontalAlignment('center').setVerticalAlignment('middle');
 }
 
 /**
@@ -355,6 +382,7 @@ function buildPhotoSheet_(ss, sheetName, photos) {
         const rg = sheet.getRange(r, INFO_COL_START, 1, INFO_COL_END - INFO_COL_START + 1);
         rg.merge();
         rg.setFontFamily('MS PGothic').setFontSize(9).setVerticalAlignment('middle');
+        rg.setBorder(true, null, true, null, false, false, '#999999', SpreadsheetApp.BorderStyle.DOTTED);
       });
 
     sheet.getRange(labelRow, INFO_COL_START).setValue('撮影日時');
@@ -379,14 +407,20 @@ function buildPhotoSheet_(ss, sheetName, photos) {
 /**
  * 画像(dataURL)をセル範囲にサイズを合わせて中央寄せで挿入。
  * 元のVBAマクロ(Worksheet_BeforeDoubleClick)と同じ挙動を再現。
+ *
+ * 注意: Googleスプレッドシートの列幅(px指定)は、xlsxへの書き出し時に
+ * Excelの文字幅単位に変換されるため、変換誤差でセル幅がわずかに縮む。
+ * そのため、計算上のセル幅・高さに安全マージンをかけてから画像サイズを決める。
  */
+const IMAGE_FIT_MARGIN = 0.88;
+
 function insertPhotoIntoRange_(sheet, dataUrl, targetRange) {
   const blob = dataUrlToBlob_(dataUrl);
   const image = sheet.insertImage(blob, targetRange.getColumn(), targetRange.getRow());
 
-  // ピクセル換算でのセル範囲サイズを取得
-  const targetWidth = getRangeWidthPx_(sheet, targetRange);
-  const targetHeight = getRangeHeightPx_(sheet, targetRange);
+  // ピクセル換算でのセル範囲サイズを取得（安全マージンを掛けて少し小さめに）
+  const targetWidth = getRangeWidthPx_(sheet, targetRange) * IMAGE_FIT_MARGIN;
+  const targetHeight = getRangeHeightPx_(sheet, targetRange) * IMAGE_FIT_MARGIN;
 
   const origWidth = image.getWidth();
   const origHeight = image.getHeight();
