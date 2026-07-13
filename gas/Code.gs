@@ -255,10 +255,12 @@ function generateReport_(body) {
   const PER_SHEET = 3; // 3枚 = 印刷1ページ分（元xlsmの改ページ位置=49行目までを1シートに）
   const sheetCount = Math.max(1, Math.ceil(photos.length / PER_SHEET));
 
+  const placementsBySheetName = {}; // 画像をセルにぴったり合わせるための後処理用データ
+
   for (let s = 0; s < sheetCount; s++) {
     const sheetPhotos = photos.slice(s * PER_SHEET, s * PER_SHEET + PER_SHEET);
     const sheetName = sheetCount > 1 ? '写真貼り付け原紙' + (s + 1) : '写真貼り付け原紙';
-    buildPhotoSheet_(ss, sheetName, sheetPhotos);
+    buildPhotoSheet_(ss, sheetName, sheetPhotos, placementsBySheetName);
   }
 
   // 既定で残る空シートSheet1を削除
@@ -267,8 +269,10 @@ function generateReport_(body) {
 
   SpreadsheetApp.flush();
 
-  // xlsx としてDriveに保存
-  const xlsxBlob = exportAsXlsx_(ss.getId());
+  // xlsx としてDriveに保存（画像をセルにぴったり合わせる後処理込み）
+  let xlsxBlob = exportAsXlsx_(ss.getId());
+  xlsxBlob = stretchImagesToFillCells_(xlsxBlob, placementsBySheetName);
+
   const outFolder = DriveApp.getFolderById(getProps_().getProperty('OUTPUT_FOLDER_ID'));
   const file = outFolder.createFile(xlsxBlob).setName(ss.getName() + '.xlsx');
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
@@ -339,7 +343,7 @@ function buildCoverSheet_(ss, body) {
  *  各ブロック内 T列オフセット: 0=撮影日時ラベル,1=値,2=撮影場所ラベル,3=値,
  *                              4=品番,5=製造番号,6=空白,7=工事内容ラベル,8=値
  */
-function buildPhotoSheet_(ss, sheetName, photos) {
+function buildPhotoSheet_(ss, sheetName, photos, placementsBySheetName) {
   const sheet = ss.insertSheet(sheetName);
 
   // デフォルトのシートは26列(A〜Z)までしかないため、AC列(29列目)まで使えるよう列を追加
@@ -400,6 +404,16 @@ function buildPhotoSheet_(ss, sheetName, photos) {
 
       if (p.dataUrl) {
         insertPhotoIntoRange_(sheet, p.dataUrl, photoRange);
+        if (placementsBySheetName) {
+          if (!placementsBySheetName[sheetName]) placementsBySheetName[sheetName] = [];
+          // OOXML(0始まり)の"to"は「境界の位置」を表すため、終端行/終端列の次の位置を指定する
+          placementsBySheetName[sheetName].push({
+            fromCol: PHOTO_COL_START - 1,      // 0
+            fromRow: startRow - 1,
+            toCol: PHOTO_COL_END,               // R列(18)の右端 = S列の開始位置
+            toRow: endRow                       // 最終行の下端 = 次の行の開始位置
+          });
+        }
       }
     }
   });
@@ -471,4 +485,101 @@ function exportAsXlsx_(spreadsheetId) {
     headers: { Authorization: 'Bearer ' + token }
   });
   return response.getBlob();
+}
+
+/**
+ * xlsx書き出し後の画像は「絶対サイズ(EMU)」で埋め込まれるため、
+ * Googleスプレッドシート→xlsxの列幅換算誤差でセルからはみ出す/隙間ができる。
+ * これを解消するため、xlsx内部のdrawing XMLを直接書き換え、
+ * 画像のアンカーを「絶対サイズ指定(oneCellAnchor)」から
+ * 「セル範囲に追従する指定(twoCellAnchor)」に変換し、
+ * 実際のセル幅・高さに関わらず必ずぴったり収まるようにする。
+ *
+ * placementsBySheetName = {
+ *   'シート名': [ { fromCol, fromRow, toCol, toRow }, ... ]  // 0始まり、写真の挿入順
+ * }
+ */
+function stretchImagesToFillCells_(blob, placementsBySheetName) {
+  if (!placementsBySheetName || Object.keys(placementsBySheetName).length === 0) return blob;
+
+  const files = Utilities.unzip(blob);
+  const fileMap = {};
+  files.forEach(f => { fileMap[f.getName()] = f; });
+
+  const getText = name => (fileMap[name] ? fileMap[name].getDataAsString('UTF-8') : null);
+
+  const workbookXml = getText('xl/workbook.xml');
+  const workbookRelsXml = getText('xl/_rels/workbook.xml.rels');
+  if (!workbookXml || !workbookRelsXml) return blob;
+
+  // シート名 -> r:id
+  const sheetNameToRid = {};
+  const sheetTagRe = /<sheet\b[^>]*\/>/g;
+  let sm;
+  while ((sm = sheetTagRe.exec(workbookXml)) !== null) {
+    const tag = sm[0];
+    const nameMatch = tag.match(/name="([^"]*)"/);
+    const ridMatch = tag.match(/r:id="([^"]*)"/);
+    if (nameMatch && ridMatch) sheetNameToRid[nameMatch[1]] = ridMatch[1];
+  }
+
+  // r:id -> worksheets/sheetN.xml
+  const ridToTarget = {};
+  const relTagRe = /<Relationship\b[^>]*\/>/g;
+  let rm;
+  while ((rm = relTagRe.exec(workbookRelsXml)) !== null) {
+    const tag = rm[0];
+    const idMatch = tag.match(/Id="([^"]*)"/);
+    const targetMatch = tag.match(/Target="([^"]*)"/);
+    if (idMatch && targetMatch) ridToTarget[idMatch[1]] = targetMatch[1];
+  }
+
+  Object.keys(placementsBySheetName).forEach(sheetName => {
+    const placements = placementsBySheetName[sheetName];
+    if (!placements || placements.length === 0) return;
+
+    const rid = sheetNameToRid[sheetName];
+    if (!rid) return;
+    const target = ridToTarget[rid]; // 例: "worksheets/sheet2.xml"
+    if (!target) return;
+
+    const sheetFileName = target.split('/').pop();
+    const sheetRelsPath = 'xl/worksheets/_rels/' + sheetFileName + '.rels';
+    const sheetRelsXml = getText(sheetRelsPath);
+    if (!sheetRelsXml) return;
+
+    let drawingTarget = null;
+    const relTagRe2 = /<Relationship\b[^>]*\/>/g;
+    let dm;
+    while ((dm = relTagRe2.exec(sheetRelsXml)) !== null) {
+      const tag = dm[0];
+      if (tag.indexOf('relationships/drawing') !== -1) {
+        const targetMatch = tag.match(/Target="([^"]*)"/);
+        if (targetMatch) drawingTarget = targetMatch[1];
+      }
+    }
+    if (!drawingTarget) return;
+
+    const drawingFileName = drawingTarget.split('/').pop();
+    const drawingPath = 'xl/drawings/' + drawingFileName;
+    let drawingXml = getText(drawingPath);
+    if (!drawingXml) return;
+
+    let idx = 0;
+    drawingXml = drawingXml.replace(
+      /<xdr:oneCellAnchor>(<xdr:from>[\s\S]*?<\/xdr:from>)<xdr:ext[^>]*\/>([\s\S]*?)<\/xdr:oneCellAnchor>/g,
+      function (whole, fromXml, restXml) {
+        const p = placements[idx++];
+        if (!p) return whole;
+        const toXml = '<xdr:to><xdr:col>' + p.toCol + '</xdr:col><xdr:colOff>0</xdr:colOff>' +
+          '<xdr:row>' + p.toRow + '</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>';
+        return '<xdr:twoCellAnchor editAs="oneCell">' + fromXml + toXml + restXml + '</xdr:twoCellAnchor>';
+      }
+    );
+
+    fileMap[drawingPath] = Utilities.newBlob(drawingXml, 'application/xml', drawingPath);
+  });
+
+  const newFiles = Object.keys(fileMap).map(name => fileMap[name]);
+  return Utilities.zip(newFiles, 'report.xlsx');
 }
