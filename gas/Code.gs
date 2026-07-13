@@ -252,7 +252,7 @@ function generateReport_(body) {
   buildCoverSheet_(ss, body);
 
   const photos = body.photos || [];
-  const PER_SHEET = 6;
+  const PER_SHEET = 3; // 3枚 = 印刷1ページ分（元xlsmの改ページ位置=49行目までを1シートに）
   const sheetCount = Math.max(1, Math.ceil(photos.length / PER_SHEET));
 
   for (let s = 0; s < sheetCount; s++) {
@@ -334,7 +334,8 @@ function buildCoverSheet_(ss, body) {
 
 /**
  * 6枠分の写真ブロックを1シートに配置。元xlsmと同じ行構成:
- *  ブロック開始行: 4, 20, 36, 53, 69, 85 (A列:写真, T列:情報)
+ *  ブロック開始行: 4, 20, 36 (A列:写真, T列:情報)。3ブロック=49行目までで
+ *  印刷1ページに収まる(元xlsmの改ページ位置と同じ)。
  *  各ブロック内 T列オフセット: 0=撮影日時ラベル,1=値,2=撮影場所ラベル,3=値,
  *                              4=品番,5=製造番号,6=空白,7=工事内容ラベル,8=値
  */
@@ -351,7 +352,7 @@ function buildPhotoSheet_(ss, sheetName, photos) {
   sheet.setColumnWidth(1, 20); // A列
   for (let c = 2; c <= 29; c++) sheet.setColumnWidth(c, 26); // B〜AC 概算
 
-  const blockStarts = [4, 20, 36, 53, 69, 85];
+  const blockStarts = [4, 20, 36]; // 元xlsmの改ページ(49行目)までの3ブロック分＝印刷1ページ
   const PHOTO_COL_START = 1;   // A
   const PHOTO_COL_END = 18;    // R
   const INFO_COL_START = 20;   // T
@@ -412,7 +413,7 @@ function buildPhotoSheet_(ss, sheetName, photos) {
  * Excelの文字幅単位に変換されるため、変換誤差でセル幅がわずかに縮む。
  * そのため、計算上のセル幅・高さに安全マージンをかけてから画像サイズを決める。
  */
-const IMAGE_FIT_MARGIN = 0.88;
+const IMAGE_FIT_MARGIN = 0.96;
 
 function insertPhotoIntoRange_(sheet, dataUrl, targetRange) {
   const blob = dataUrlToBlob_(dataUrl);

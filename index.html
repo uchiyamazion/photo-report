@@ -560,8 +560,9 @@ function onPickPhoto(e){
   });
 }
 
-// 写真貼付セル(A:R × 14行)の縦横比。常にこの比率でセンタークロップしてから挿入する。
-const PHOTO_ASPECT_RATIO = 462 / 294; // 約1.571 (横長)
+// 写真貼付セル(A:R × 14行)の縦横比。
+// GoogleスプレッドシートのpxとExcelエクスポート後の実測px(426×294)から算出。
+const PHOTO_ASPECT_RATIO = 426 / 294; // 約1.449 (横長)
 
 function resizeImage(file, maxPixels, quality){
   return new Promise((resolve, reject) => {
