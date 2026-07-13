@@ -192,6 +192,10 @@
       <label class="field">
         <span>宛先会社</span>
         <select id="companySelect"></select>
+        <div class="add-row" id="companyCustomRow" style="display:none; margin-top:8px;">
+          <input type="text" id="companyCustom1" placeholder="会社名（自由入力）">
+          <input type="text" id="companyCustom2" placeholder="支店・部署（任意）">
+        </div>
       </label>
     </div>
 
@@ -289,6 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cancelKataBtn').addEventListener('click', () => exitEditKata());
   document.getElementById('cancelKojiBtn').addEventListener('click', () => exitEditKoji());
   document.getElementById('cancelCompanyBtn').addEventListener('click', () => exitEditCompany());
+  document.getElementById('companySelect').addEventListener('change', toggleCompanyCustomRow);
 
   const today = new Date();
   document.getElementById('workDate').value = today.toISOString().slice(0,10);
@@ -398,8 +403,15 @@ function renderCompanySelect(){
   sel.innerHTML = '<option value="">選択してください</option>' +
     master.companyList.map((c, i) =>
       `<option value="${i}">${escapeHtml(c.company1)}${c.company2 ? '　' + escapeHtml(c.company2) : ''}</option>`
-    ).join('');
-  if (prevValue && Number(prevValue) < master.companyList.length) sel.value = prevValue;
+    ).join('') +
+    '<option value="__custom__">その他（自由入力）</option>';
+  if (prevValue && (prevValue === '__custom__' || Number(prevValue) < master.companyList.length)) sel.value = prevValue;
+  toggleCompanyCustomRow();
+}
+
+function toggleCompanyCustomRow(){
+  const sel = document.getElementById('companySelect');
+  document.getElementById('companyCustomRow').style.display = sel.value === '__custom__' ? 'flex' : 'none';
 }
 
 async function addKataMaster(){
@@ -538,7 +550,10 @@ function onPickPhoto(e){
       place: '',
       kata: '',
       seizo: '',
-      koji: ''
+      koji: '',
+      kataCustom: false,
+      seizoCustom: false,
+      kojiCustom: false
     });
     renderPhotoList();
     e.target.value = '';
@@ -578,15 +593,24 @@ function renderPhotoList(){
     const div = document.createElement('div');
     div.className = 'photo-item';
 
+    const kataIsCustom = p.kataCustom || (p.kata && !master.kataList.includes(p.kata));
     const kataOptions = ['<option value="">型式選択</option>']
-      .concat(master.kataList.map(k => `<option value="${escapeHtml(k)}" ${p.kata===k?'selected':''}>${escapeHtml(k)}</option>`)).join('');
+      .concat(master.kataList.map(k => `<option value="${escapeHtml(k)}" ${(!kataIsCustom && p.kata===k)?'selected':''}>${escapeHtml(k)}</option>`))
+      .concat([`<option value="__custom__" ${kataIsCustom?'selected':''}>その他（自由入力）</option>`])
+      .join('');
 
     const seizoList = master.seizoByKata[p.kata] || [];
+    const seizoIsCustom = p.seizoCustom || (p.seizo && !seizoList.includes(p.seizo));
     const seizoOptions = ['<option value="">製造番号選択</option>']
-      .concat(seizoList.map(s => `<option value="${escapeHtml(s)}" ${p.seizo===s?'selected':''}>${escapeHtml(s)}</option>`)).join('');
+      .concat(seizoList.map(s => `<option value="${escapeHtml(s)}" ${(!seizoIsCustom && p.seizo===s)?'selected':''}>${escapeHtml(s)}</option>`))
+      .concat([`<option value="__custom__" ${seizoIsCustom?'selected':''}>その他（自由入力）</option>`])
+      .join('');
 
+    const kojiIsCustom = p.kojiCustom || (p.koji && !master.kojiList.includes(p.koji));
     const kojiOptions = ['<option value="">工事内容選択</option>']
-      .concat(master.kojiList.map(k => `<option value="${escapeHtml(k)}" ${p.koji===k?'selected':''}>${escapeHtml(k)}</option>`)).join('');
+      .concat(master.kojiList.map(k => `<option value="${escapeHtml(k)}" ${(!kojiIsCustom && p.koji===k)?'selected':''}>${escapeHtml(k)}</option>`))
+      .concat([`<option value="__custom__" ${kojiIsCustom?'selected':''}>その他（自由入力）</option>`])
+      .join('');
 
     div.innerHTML = `
       <div class="photo-thumb" style="background-image:url('${p.dataUrl}')"></div>
@@ -602,8 +626,17 @@ function renderPhotoList(){
           <select class="f-kata">${kataOptions}</select>
           <select class="f-seizo">${seizoOptions}</select>
         </div>
+        <div class="row" style="${kataIsCustom ? '' : 'display:none;'}">
+          <input type="text" class="f-kata-custom" placeholder="型式を入力" value="${escapeHtml(kataIsCustom ? p.kata : '')}">
+        </div>
+        <div class="row" style="${seizoIsCustom ? '' : 'display:none;'}">
+          <input type="text" class="f-seizo-custom" placeholder="製造番号を入力" value="${escapeHtml(seizoIsCustom ? p.seizo : '')}">
+        </div>
         <div class="row">
           <select class="f-koji">${kojiOptions}</select>
+        </div>
+        <div class="row" style="${kojiIsCustom ? '' : 'display:none;'}">
+          <input type="text" class="f-koji-custom" placeholder="工事内容を入力" value="${escapeHtml(kojiIsCustom ? p.koji : '')}">
         </div>
       </div>
     `;
@@ -614,9 +647,28 @@ function renderPhotoList(){
     });
     div.querySelector('.f-shotAt').addEventListener('change', e => p.shotAt = e.target.value);
     div.querySelector('.f-place').addEventListener('input', e => p.place = e.target.value);
-    div.querySelector('.f-kata').addEventListener('change', e => { p.kata = e.target.value; p.seizo=''; renderPhotoList(); });
-    div.querySelector('.f-seizo').addEventListener('change', e => p.seizo = e.target.value);
-    div.querySelector('.f-koji').addEventListener('change', e => p.koji = e.target.value);
+
+    div.querySelector('.f-kata').addEventListener('change', e => {
+      if (e.target.value === '__custom__') { p.kataCustom = true; p.kata = ''; }
+      else { p.kataCustom = false; p.kata = e.target.value; }
+      p.seizo = ''; p.seizoCustom = false;
+      renderPhotoList();
+    });
+    div.querySelector('.f-kata-custom').addEventListener('input', e => { p.kata = e.target.value; });
+
+    div.querySelector('.f-seizo').addEventListener('change', e => {
+      if (e.target.value === '__custom__') { p.seizoCustom = true; p.seizo = ''; }
+      else { p.seizoCustom = false; p.seizo = e.target.value; }
+      renderPhotoList();
+    });
+    div.querySelector('.f-seizo-custom').addEventListener('input', e => { p.seizo = e.target.value; });
+
+    div.querySelector('.f-koji').addEventListener('change', e => {
+      if (e.target.value === '__custom__') { p.kojiCustom = true; p.koji = ''; }
+      else { p.kojiCustom = false; p.koji = e.target.value; }
+      renderPhotoList();
+    });
+    div.querySelector('.f-koji-custom').addEventListener('input', e => { p.koji = e.target.value; });
 
     list.appendChild(div);
   });
@@ -631,7 +683,14 @@ async function submitReport(){
   if (photos.length === 0){ toast('写真を1枚以上追加してください'); return; }
 
   const companyIdx = document.getElementById('companySelect').value;
-  const company = companyIdx !== '' ? master.companyList[Number(companyIdx)] : null;
+  let company = null;
+  if (companyIdx === '__custom__') {
+    const c1 = document.getElementById('companyCustom1').value.trim();
+    const c2 = document.getElementById('companyCustom2').value.trim();
+    if (c1) company = { company1: c1, company2: c2 };
+  } else if (companyIdx !== '') {
+    company = master.companyList[Number(companyIdx)];
+  }
 
   const btn = document.getElementById('submitBtn');
   btn.disabled = true;
