@@ -268,7 +268,7 @@
 // ★ GASをウェブアプリとしてデプロイした後、発行されたURLをここに設定してください
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzqkCPh4jiEYc2EeRUTPbdN7WnK9WHA2uqkOiZOxG_tdnRky7DVeV0yRYYBWikTyMdh/exec';
 
-const MAX_IMAGE_DIMENSION = 1600; // 送信前に長辺をこのpx以下にリサイズ
+const MAX_IMAGE_PIXELS = 900000; // GASのinsertImage上限(100万画素)に余裕を持たせた値
 const JPEG_QUALITY = 0.75;
 
 /* ================= 状態 ================= */
@@ -541,7 +541,7 @@ async function deleteCompanyMaster(c){
 function onPickPhoto(e){
   const file = e.target.files[0];
   if (!file) return;
-  resizeImage(file, MAX_IMAGE_DIMENSION, JPEG_QUALITY).then(dataUrl => {
+  resizeImage(file, MAX_IMAGE_PIXELS, JPEG_QUALITY).then(dataUrl => {
     const now = new Date();
     photos.push({
       id: 'p' + Date.now() + Math.random().toString(16).slice(2),
@@ -560,7 +560,7 @@ function onPickPhoto(e){
   });
 }
 
-function resizeImage(file, maxDim, quality){
+function resizeImage(file, maxPixels, quality){
   return new Promise((resolve, reject) => {
     const img = new Image();
     const reader = new FileReader();
@@ -568,9 +568,11 @@ function resizeImage(file, maxDim, quality){
     reader.onerror = reject;
     img.onload = () => {
       let { width, height } = img;
-      if (width > maxDim || height > maxDim){
-        if (width >= height){ height = Math.round(height * maxDim / width); width = maxDim; }
-        else { width = Math.round(width * maxDim / height); height = maxDim; }
+      const totalPixels = width * height;
+      if (totalPixels > maxPixels){
+        const scale = Math.sqrt(maxPixels / totalPixels);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
       }
       const canvas = document.createElement('canvas');
       canvas.width = width; canvas.height = height;
