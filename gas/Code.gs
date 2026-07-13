@@ -313,6 +313,14 @@ function buildCoverSheet_(ss, body) {
  */
 function buildPhotoSheet_(ss, sheetName, photos) {
   const sheet = ss.insertSheet(sheetName);
+
+  // デフォルトのシートは26列(A〜Z)までしかないため、AC列(29列目)まで使えるよう列を追加
+  const neededCols = 29;
+  const currentCols = sheet.getMaxColumns();
+  if (currentCols < neededCols) {
+    sheet.insertColumnsAfter(currentCols, neededCols - currentCols);
+  }
+
   sheet.setColumnWidth(1, 20); // A列
   for (let c = 2; c <= 29; c++) sheet.setColumnWidth(c, 26); // B〜AC 概算
 
