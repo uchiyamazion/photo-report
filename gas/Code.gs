@@ -40,7 +40,22 @@ function initSetup() {
     props.setProperty('OUTPUT_FOLDER_ID', folder.getId());
   }
 
+  ensureReportsSheet_();
+
   Logger.log('セットアップ完了');
+}
+
+/**
+ * 「報告書一覧」シートを確保する（既存ユーザーが後からinitSetup()を再実行しても追加されるように）。
+ */
+function ensureReportsSheet_() {
+  const ss = getMasterSheet_();
+  let sh = ss.getSheetByName('報告書一覧');
+  if (!sh) {
+    sh = ss.insertSheet('報告書一覧');
+    sh.appendRow(['fileId', 'spreadsheetId', '物件名', '作業日', '作成日時', 'ファイル名']);
+  }
+  return sh;
 }
 
 function getProps_() {
@@ -53,6 +68,8 @@ function doGet(e) {
   const action = (e.parameter && e.parameter.action) || 'master';
   if (action === 'master') {
     return jsonOut_(getMasterData_());
+  } else if (action === 'reports') {
+    return jsonOut_(getReportsList_());
   }
   return jsonOut_({ error: 'unknown action' });
 }
@@ -75,6 +92,8 @@ function doPost(e) {
       return jsonOut_(deleteMaster_(body));
     } else if (action === 'generateReport') {
       return jsonOut_(generateReport_(body));
+    } else if (action === 'deleteReport') {
+      return jsonOut_(deleteReport_(body));
     }
     return jsonOut_({ ok: false, error: 'unknown action: ' + action });
   } catch (err) {
@@ -236,6 +255,51 @@ function deleteMaster_(body) {
   return { ok: true, data: getMasterData_() };
 }
 
+// ===================== 報告書一覧 =====================
+
+function getReportsList_() {
+  const sh = ensureReportsSheet_();
+  const data = sh.getDataRange().getValues().slice(1).filter(r => r[0] !== '');
+
+  const reports = data.map(r => ({
+    fileId: r[0],
+    spreadsheetId: r[1],
+    siteName: r[2],
+    workDate: r[3],
+    createdAt: r[4],
+    fileName: r[5],
+    downloadUrl: 'https://drive.google.com/uc?export=download&id=' + r[0],
+    spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/' + r[1] + '/edit'
+  }));
+  reports.reverse(); // 新しい順
+
+  return { ok: true, reports: reports };
+}
+
+/**
+ * body = { fileId }
+ */
+function deleteReport_(body) {
+  if (!body.fileId) throw new Error('fileIdが指定されていません');
+
+  const sh = ensureReportsSheet_();
+  const data = sh.getDataRange().getValues();
+  let spreadsheetId = null;
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (data[i][0] === body.fileId) {
+      spreadsheetId = data[i][1];
+      sh.deleteRow(i + 1);
+    }
+  }
+
+  try { DriveApp.getFileById(body.fileId).setTrashed(true); } catch (e) { /* 既に削除済みなど */ }
+  if (spreadsheetId) {
+    try { DriveApp.getFileById(spreadsheetId).setTrashed(true); } catch (e) { /* 既に削除済みなど */ }
+  }
+
+  return getReportsList_();
+}
+
 // ===================== 報告書生成 =====================
 
 /**
@@ -276,6 +340,16 @@ function generateReport_(body) {
   const outFolder = DriveApp.getFolderById(getProps_().getProperty('OUTPUT_FOLDER_ID'));
   const file = outFolder.createFile(xlsxBlob).setName(ss.getName() + '.xlsx');
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+  // 報告書一覧に記録（あとで一覧表示・削除できるように）
+  ensureReportsSheet_().appendRow([
+    file.getId(),
+    ss.getId(),
+    body.siteName || '',
+    body.workDate || '',
+    Utilities.formatDate(new Date(), 'JST', 'yyyy-MM-dd HH:mm'),
+    file.getName()
+  ]);
 
   return {
     ok: true,

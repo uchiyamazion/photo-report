@@ -166,6 +166,7 @@
   </div>
   <nav class="tabs">
     <button data-tab="new" class="active">新規作成</button>
+    <button data-tab="reports">保存済み一覧</button>
     <button data-tab="master">マスタ管理</button>
   </nav>
 </header>
@@ -209,6 +210,15 @@
     </div>
 
     <div id="resultArea"></div>
+  </section>
+
+  <!-- ============ 保存済み一覧 ============ -->
+  <section id="tab-reports">
+    <div class="card">
+      <h2>作成済みの報告書</h2>
+      <ul class="master-list" id="reportsList"></ul>
+      <div class="empty" id="reportsEmpty" style="display:none;">まだ報告書が作成されていません。</div>
+    </div>
   </section>
 
   <!-- ============ マスタ管理 ============ -->
@@ -299,6 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('workDate').value = today.toISOString().slice(0,10);
 
   loadMaster();
+  loadReports();
   renderPhotoList();
 });
 
@@ -310,6 +321,7 @@ function initTabs(){
       document.querySelectorAll('main section').forEach(s => s.classList.remove('active'));
       document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
       document.getElementById('fabNew').style.display = btn.dataset.tab === 'new' ? 'block' : 'none';
+      if (btn.dataset.tab === 'reports') loadReports();
     });
   });
 }
@@ -412,6 +424,56 @@ function renderCompanySelect(){
 function toggleCompanyCustomRow(){
   const sel = document.getElementById('companySelect');
   document.getElementById('companyCustomRow').style.display = sel.value === '__custom__' ? 'flex' : 'none';
+}
+
+/* ================= 保存済み一覧 ================= */
+async function loadReports(){
+  try{
+    const res = await fetch(GAS_URL + '?action=reports');
+    const data = await res.json();
+    if (data.ok){
+      renderReportsList(data.reports || []);
+    }
+  }catch(err){
+    console.error(err);
+    toast('報告書一覧の取得に失敗しました');
+  }
+}
+
+function renderReportsList(reports){
+  const ul = document.getElementById('reportsList');
+  const empty = document.getElementById('reportsEmpty');
+  ul.innerHTML = '';
+  empty.style.display = reports.length === 0 ? 'block' : 'none';
+
+  reports.forEach(r => {
+    const li = document.createElement('li');
+    li.style.alignItems = 'flex-start';
+    li.innerHTML = `
+      <div>
+        <div>${escapeHtml(r.siteName || '（物件名なし）')}</div>
+        <div class="master-sub">作業日: ${escapeHtml(r.workDate || '-')} ／ 作成: ${escapeHtml(r.createdAt || '-')}</div>
+      </div>
+      <div class="master-actions" style="flex-direction:column; align-items:flex-end; gap:8px;">
+        <a href="${r.downloadUrl}" target="_blank" class="edit-link">Excel</a>
+        <a href="${r.spreadsheetUrl}" target="_blank" class="edit-link">Sheet</a>
+        <button class="photo-remove">削除</button>
+      </div>
+    `;
+    li.querySelector('.photo-remove').addEventListener('click', () => deleteReport(r.fileId, r.siteName));
+    ul.appendChild(li);
+  });
+}
+
+async function deleteReport(fileId, siteName){
+  if (!confirm((siteName || 'この報告書') + ' を削除しますか？(元に戻せません)')) return;
+  const res = await postGas({ action:'deleteReport', fileId });
+  if (res.ok){
+    renderReportsList(res.reports || []);
+    toast('削除しました');
+  } else {
+    toast('削除に失敗しました: ' + (res.error || ''));
+  }
 }
 
 async function addKataMaster(){
@@ -740,6 +802,7 @@ async function submitReport(){
           <a href="${res.downloadUrl}" target="_blank">Excel(.xlsx)をダウンロード</a><br>
           <a href="${res.spreadsheetUrl}" target="_blank">Googleスプレッドシートで開く</a>
         </div>`;
+      loadReports();
     } else {
       toast('作成に失敗しました: ' + (res.error || '不明なエラー'));
     }
