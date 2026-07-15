@@ -203,10 +203,14 @@
     <div class="card">
       <h2>写真（<span id="photoCount">0</span>枚）</h2>
       <div id="photoList"></div>
-      <div class="empty" id="photoEmpty">まだ写真がありません。下の「写真を追加」から撮影してください。</div>
+      <div class="empty" id="photoEmpty">まだ写真がありません。下のボタンから追加してください。</div>
 
-      <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none">
-      <button class="btn btn-outline btn-block" id="addPhotoBtn" style="margin-top:8px;">＋ 写真を追加</button>
+      <input type="file" id="cameraInput" accept="image/*" capture="environment" multiple style="display:none">
+      <input type="file" id="galleryInput" accept="image/*" multiple style="display:none">
+      <div class="add-row" style="margin-top:8px;">
+        <button class="btn btn-outline" id="addPhotoCameraBtn">📷 カメラで撮影</button>
+        <button class="btn btn-outline" id="addPhotoGalleryBtn">🖼 写真を選択</button>
+      </div>
     </div>
 
     <div id="resultArea"></div>
@@ -291,10 +295,14 @@ let editingCompany = null; // { company1, company2 } 編集中の元の値
 /* ================= 初期化 ================= */
 document.addEventListener('DOMContentLoaded', () => {
   initTabs();
-  document.getElementById('addPhotoBtn').addEventListener('click', () => {
+  document.getElementById('addPhotoCameraBtn').addEventListener('click', () => {
     document.getElementById('cameraInput').click();
   });
+  document.getElementById('addPhotoGalleryBtn').addEventListener('click', () => {
+    document.getElementById('galleryInput').click();
+  });
   document.getElementById('cameraInput').addEventListener('change', onPickPhoto);
+  document.getElementById('galleryInput').addEventListener('change', onPickPhoto);
   document.getElementById('submitBtn').addEventListener('click', submitReport);
   document.getElementById('resetBtn').addEventListener('click', resetForm);
   document.getElementById('addKataBtn').addEventListener('click', addKataMaster);
@@ -601,21 +609,24 @@ async function deleteCompanyMaster(c){
 
 /* ================= 写真 ================= */
 function onPickPhoto(e){
-  const file = e.target.files[0];
-  if (!file) return;
-  resizeImage(file, MAX_IMAGE_PIXELS, JPEG_QUALITY).then(dataUrl => {
+  const files = Array.from(e.target.files || []);
+  if (files.length === 0) return;
+
+  Promise.all(files.map(file => resizeImage(file, MAX_IMAGE_PIXELS, JPEG_QUALITY))).then(dataUrls => {
     const now = new Date();
-    photos.push({
-      id: 'p' + Date.now() + Math.random().toString(16).slice(2),
-      dataUrl,
-      shotAt: formatDateOnly(now),
-      place: '',
-      kata: '',
-      seizo: '',
-      koji: '',
-      kataCustom: false,
-      seizoCustom: false,
-      kojiCustom: false
+    dataUrls.forEach(dataUrl => {
+      photos.push({
+        id: 'p' + Date.now() + Math.random().toString(16).slice(2),
+        dataUrl,
+        shotAt: formatDateOnly(now),
+        place: '',
+        kata: '',
+        seizo: '',
+        koji: '',
+        kataCustom: false,
+        seizoCustom: false,
+        kojiCustom: false
+      });
     });
     renderPhotoList();
     e.target.value = '';
