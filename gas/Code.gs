@@ -576,7 +576,9 @@ function exportAsXlsx_(spreadsheetId) {
 function stretchImagesToFillCells_(blob, placementsBySheetName) {
   if (!placementsBySheetName || Object.keys(placementsBySheetName).length === 0) return blob;
 
-  const files = Utilities.unzip(blob);
+  // Utilities.unzip()はBlobのContentTypeが厳密に"application/zip"であることを要求するため変換する
+  const zipBlob = blob.copyBlob().setContentType('application/zip');
+  const files = Utilities.unzip(zipBlob);
   const fileMap = {};
   files.forEach(f => { fileMap[f.getName()] = f; });
 
@@ -655,5 +657,6 @@ function stretchImagesToFillCells_(blob, placementsBySheetName) {
   });
 
   const newFiles = Object.keys(fileMap).map(name => fileMap[name]);
-  return Utilities.zip(newFiles, 'report.xlsx');
+  const zipped = Utilities.zip(newFiles, 'report.xlsx');
+  return zipped.setContentType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
