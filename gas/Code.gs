@@ -53,7 +53,7 @@ function ensureReportsSheet_() {
   let sh = ss.getSheetByName('報告書一覧');
   if (!sh) {
     sh = ss.insertSheet('報告書一覧');
-    sh.appendRow(['fileId', 'spreadsheetId', '物件名', '作業日', '作成日時', 'ファイル名']);
+    sh.appendRow(['fileId', 'spreadsheetId', '物件名', '作業日', '作成日時', 'ファイル名', 'dataFileId']);
   }
   return sh;
 }
@@ -70,6 +70,8 @@ function doGet(e) {
     return jsonOut_(getMasterData_());
   } else if (action === 'reports') {
     return jsonOut_(getReportsList_());
+  } else if (action === 'reportData') {
+    return jsonOut_(getReportData_(e.parameter.dataFileId));
   }
   return jsonOut_({ error: 'unknown action' });
 }
@@ -268,12 +270,23 @@ function getReportsList_() {
     workDate: r[3],
     createdAt: r[4],
     fileName: r[5],
+    dataFileId: r[6] || '',
     downloadUrl: 'https://drive.google.com/uc?export=download&id=' + r[0],
     spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/' + r[1] + '/edit'
   }));
   reports.reverse(); // 新しい順
 
   return { ok: true, reports: reports };
+}
+
+/**
+ * 編集用に、保存済み報告書の元データ(現場情報＋写真)を取得する。
+ * body = { dataFileId }
+ */
+function getReportData_(dataFileId) {
+  if (!dataFileId) throw new Error('dataFileIdが指定されていません');
+  const text = DriveApp.getFileById(dataFileId).getBlob().getDataAsString('UTF-8');
+  return { ok: true, data: JSON.parse(text) };
 }
 
 /**
@@ -285,9 +298,11 @@ function deleteReport_(body) {
   const sh = ensureReportsSheet_();
   const data = sh.getDataRange().getValues();
   let spreadsheetId = null;
+  let dataFileId = null;
   for (let i = data.length - 1; i >= 1; i--) {
     if (data[i][0] === body.fileId) {
       spreadsheetId = data[i][1];
+      dataFileId = data[i][6];
       sh.deleteRow(i + 1);
     }
   }
@@ -295,6 +310,9 @@ function deleteReport_(body) {
   try { DriveApp.getFileById(body.fileId).setTrashed(true); } catch (e) { /* 既に削除済みなど */ }
   if (spreadsheetId) {
     try { DriveApp.getFileById(spreadsheetId).setTrashed(true); } catch (e) { /* 既に削除済みなど */ }
+  }
+  if (dataFileId) {
+    try { DriveApp.getFileById(dataFileId).setTrashed(true); } catch (e) { /* 既に削除済みなど */ }
   }
 
   return getReportsList_();
@@ -320,11 +338,13 @@ function generateReport_(body) {
   const sheetCount = Math.max(1, Math.ceil(photos.length / PER_SHEET));
 
   const placementsBySheetName = {}; // 画像をセルにぴったり合わせるための後処理用データ
+  const printRangesBySheetName = { '表紙': 'A1:L33' }; // 各シート=印刷1ページに収める範囲
 
   for (let s = 0; s < sheetCount; s++) {
     const sheetPhotos = photos.slice(s * PER_SHEET, s * PER_SHEET + PER_SHEET);
     const sheetName = sheetCount > 1 ? '写真貼り付け原紙' + (s + 1) : '写真貼り付け原紙';
     buildPhotoSheet_(ss, sheetName, sheetPhotos, placementsBySheetName);
+    printRangesBySheetName[sheetName] = 'A1:AC49';
   }
 
   // 既定で残る空シートSheet1を削除
@@ -333,23 +353,34 @@ function generateReport_(body) {
 
   SpreadsheetApp.flush();
 
-  // xlsx としてDriveに保存（画像をセルにぴったり合わせる後処理込み）
+  // xlsx としてDriveに保存（画像をセルにぴったり合わせる後処理＋印刷範囲を1ページに固定）
   let xlsxBlob = exportAsXlsx_(ss.getId());
   xlsxBlob = stretchImagesToFillCells_(xlsxBlob, placementsBySheetName);
+  xlsxBlob = applyPrintSettings_(xlsxBlob, printRangesBySheetName);
 
   const outFolder = DriveApp.getFolderById(getProps_().getProperty('OUTPUT_FOLDER_ID'));
   const file = outFolder.createFile(xlsxBlob).setName(ss.getName() + '.xlsx');
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-  // 報告書一覧に記録（あとで一覧表示・削除できるように）
+  // 編集時に読み込み直せるよう、送信された元データ(写真含む)をJSONファイルとして保存
+  const dataBlob = Utilities.newBlob(JSON.stringify(body), 'application/json', ss.getName() + '.json');
+  const dataFile = outFolder.createFile(dataBlob);
+
+  // 報告書一覧に記録（あとで一覧表示・編集・削除できるように）
   ensureReportsSheet_().appendRow([
     file.getId(),
     ss.getId(),
     body.siteName || '',
     body.workDate || '',
     Utilities.formatDate(new Date(), 'JST', 'yyyy-MM-dd HH:mm'),
-    file.getName()
+    file.getName(),
+    dataFile.getId()
   ]);
+
+  // 編集モード（既存報告書の差し替え）の場合、古いファイルを削除
+  if (body.editFileId) {
+    try { deleteReport_({ fileId: body.editFileId }); } catch (e) { /* 削除失敗は無視 */ }
+  }
 
   return {
     ok: true,
@@ -655,6 +686,115 @@ function stretchImagesToFillCells_(blob, placementsBySheetName) {
 
     fileMap[drawingPath] = Utilities.newBlob(drawingXml, 'application/xml', drawingPath);
   });
+
+  const newFiles = Object.keys(fileMap).map(name => fileMap[name]);
+  const zipped = Utilities.zip(newFiles, 'report.xlsx');
+  return zipped.setContentType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+/**
+ * Apps ScriptのSpreadsheetApp APIには印刷範囲・改ページ・拡大縮小印刷を
+ * 設定する手段がないため、xlsx内部のXMLを直接書き換えて設定する。
+ * 各シートを「印刷範囲=指定レンジ」「1ページに収まるよう自動縮小」にする。
+ *
+ * sheetPrintRanges = { 'シート名': 'A1:AC49', ... }  （A1形式、シート名なし）
+ */
+function applyPrintSettings_(blob, sheetPrintRanges) {
+  if (!sheetPrintRanges || Object.keys(sheetPrintRanges).length === 0) return blob;
+
+  const zipBlob = blob.copyBlob().setContentType('application/zip');
+  const files = Utilities.unzip(zipBlob);
+  const fileMap = {};
+  files.forEach(f => { fileMap[f.getName()] = f; });
+
+  const getText = name => (fileMap[name] ? fileMap[name].getDataAsString('UTF-8') : null);
+
+  let workbookXml = getText('xl/workbook.xml');
+  const workbookRelsXml = getText('xl/_rels/workbook.xml.rels');
+  if (!workbookXml || !workbookRelsXml) return blob;
+
+  // シート名 -> { rid, index(0始まりのシート順) }
+  const sheetInfo = {};
+  const sheetTagRe = /<sheet\b[^>]*\/>/g;
+  let sm;
+  let sheetIndex = 0;
+  while ((sm = sheetTagRe.exec(workbookXml)) !== null) {
+    const tag = sm[0];
+    const nameMatch = tag.match(/name="([^"]*)"/);
+    const ridMatch = tag.match(/r:id="([^"]*)"/);
+    if (nameMatch && ridMatch) {
+      sheetInfo[nameMatch[1]] = { rid: ridMatch[1], index: sheetIndex };
+    }
+    sheetIndex++;
+  }
+
+  const ridToTarget = {};
+  const relTagRe = /<Relationship\b[^>]*\/>/g;
+  let rm;
+  while ((rm = relTagRe.exec(workbookRelsXml)) !== null) {
+    const tag = rm[0];
+    const idMatch = tag.match(/Id="([^"]*)"/);
+    const targetMatch = tag.match(/Target="([^"]*)"/);
+    if (idMatch && targetMatch) ridToTarget[idMatch[1]] = targetMatch[1];
+  }
+
+  const definedNamesList = [];
+
+  Object.keys(sheetPrintRanges).forEach(sheetName => {
+    const info = sheetInfo[sheetName];
+    if (!info) return;
+    const target = ridToTarget[info.rid]; // 例: "worksheets/sheet2.xml"
+    if (!target) return;
+
+    const sheetPath = 'xl/' + target;
+    let sheetXml = getText(sheetPath);
+    if (!sheetXml) return;
+
+    // 1. sheetPrに fitToPage を追加（1ページに収まるよう自動縮小）
+    if (sheetXml.indexOf('<sheetPr>') !== -1) {
+      if (sheetXml.indexOf('pageSetUpPr') === -1) {
+        sheetXml = sheetXml.replace('<sheetPr>', '<sheetPr><pageSetUpPr fitToPage="1"/>');
+      }
+    } else if (sheetXml.indexOf('<sheetPr/>') !== -1) {
+      sheetXml = sheetXml.replace('<sheetPr/>', '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
+    } else {
+      sheetXml = sheetXml.replace(/(<worksheet\b[^>]*>)/, '$1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
+    }
+
+    // 2. pageMargins/pageSetup を drawing の直前（なければ</worksheet>の直前）に挿入
+    const pageXml =
+      '<pageMargins left="0.51" right="0.51" top="0.55" bottom="0.55" header="0.3" footer="0.3"/>' +
+      '<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="1"/>';
+
+    if (sheetXml.indexOf('<drawing ') !== -1) {
+      sheetXml = sheetXml.replace('<drawing ', pageXml + '<drawing ');
+    } else {
+      sheetXml = sheetXml.replace('</worksheet>', pageXml + '</worksheet>');
+    }
+
+    fileMap[sheetPath] = Utilities.newBlob(sheetXml, 'application/xml', sheetPath);
+
+    // 3. 印刷範囲（definedName）を組み立てる
+    const range = sheetPrintRanges[sheetName];
+    const absRange = range.replace(/([A-Z]+)(\d+)/g, '$$$1$$$2'); // A1:L33 -> $A$1:$L$33
+    definedNamesList.push(
+      '<definedName name="_xlnm.Print_Area" localSheetId="' + info.index + '">\'' +
+      sheetName.replace(/'/g, "''") + '\'!' + absRange +
+      '</definedName>'
+    );
+  });
+
+  if (definedNamesList.length > 0) {
+    const definedNamesXml = '<definedNames>' + definedNamesList.join('') + '</definedNames>';
+    if (workbookXml.indexOf('<definedNames/>') !== -1) {
+      workbookXml = workbookXml.replace('<definedNames/>', definedNamesXml);
+    } else if (workbookXml.indexOf('<definedNames>') !== -1) {
+      workbookXml = workbookXml.replace(/<definedNames>[\s\S]*?<\/definedNames>/, definedNamesXml);
+    } else {
+      workbookXml = workbookXml.replace('</sheets>', '</sheets>' + definedNamesXml);
+    }
+    fileMap['xl/workbook.xml'] = Utilities.newBlob(workbookXml, 'application/xml', 'xl/workbook.xml');
+  }
 
   const newFiles = Object.keys(fileMap).map(name => fileMap[name]);
   const zipped = Utilities.zip(newFiles, 'report.xlsx');

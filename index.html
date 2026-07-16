@@ -291,6 +291,7 @@ let photos = []; // { id, dataUrl, shotAt, place, kata, seizo, koji }
 let editingKata = null;    // { kata, seizo } 編集中の元の値
 let editingKoji = null;    // koji文字列（元の値）
 let editingCompany = null; // { company1, company2 } 編集中の元の値
+let editContext = null;    // { fileId } 保存済み報告書を編集中の場合にセット
 
 /* ================= 初期化 ================= */
 document.addEventListener('DOMContentLoaded', () => {
@@ -463,14 +464,112 @@ function renderReportsList(reports){
         <div class="master-sub">作業日: ${escapeHtml(r.workDate || '-')} ／ 作成: ${escapeHtml(r.createdAt || '-')}</div>
       </div>
       <div class="master-actions" style="flex-direction:column; align-items:flex-end; gap:8px;">
+        <button class="edit-link" style="background:none;border:none;">編集</button>
         <a href="${r.downloadUrl}" target="_blank" class="edit-link">Excel</a>
         <a href="${r.spreadsheetUrl}" target="_blank" class="edit-link">Sheet</a>
         <button class="photo-remove">削除</button>
       </div>
     `;
+    li.querySelector('.edit-link').addEventListener('click', () => editReport(r));
     li.querySelector('.photo-remove').addEventListener('click', () => deleteReport(r.fileId, r.siteName));
     ul.appendChild(li);
   });
+}
+
+async function editReport(report){
+  if (!report.dataFileId){ toast('この報告書は編集データが保存されていないため編集できません'); return; }
+  if (photos.length > 0 && !confirm('現在入力中の内容は破棄されます。よろしいですか？')) return;
+
+  try{
+    const res = await fetch(GAS_URL + '?action=reportData&dataFileId=' + encodeURIComponent(report.dataFileId));
+    const json = await res.json();
+    if (!json.ok){ toast('データの取得に失敗しました: ' + (json.error || '')); return; }
+    loadReportIntoForm(json.data, report.fileId);
+  }catch(err){
+    console.error(err);
+    toast('データの取得に失敗しました');
+  }
+}
+
+function loadReportIntoForm(data, fileId){
+  editContext = { fileId };
+
+  document.getElementById('siteName').value = data.siteName || '';
+  document.getElementById('workContent').value = data.workContent || '';
+  document.getElementById('workDate').value = data.workDate || '';
+
+  // 宛先会社の一致するマスタを探す。なければ自由入力欄に入れる
+  const matchIdx = master.companyList.findIndex(c =>
+    c.company1 === (data.companyLine1 || '') && c.company2 === (data.companyLine2 || ''));
+  if (matchIdx !== -1) {
+    renderCompanySelect();
+    document.getElementById('companySelect').value = String(matchIdx);
+    toggleCompanyCustomRow();
+  } else if (data.companyLine1) {
+    renderCompanySelect();
+    document.getElementById('companySelect').value = '__custom__';
+    toggleCompanyCustomRow();
+    document.getElementById('companyCustom1').value = data.companyLine1 || '';
+    document.getElementById('companyCustom2').value = data.companyLine2 || '';
+  }
+
+  photos = (data.photos || []).map(p => ({
+    id: 'p' + Date.now() + Math.random().toString(16).slice(2),
+    dataUrl: p.dataUrl,
+    shotAt: fromJapaneseDate(p.shotAt),
+    place: p.place || '',
+    kata: p.kata || '',
+    seizo: p.seizo || '',
+    koji: p.koji || '',
+    kataCustom: !!(p.kata && !master.kataList.includes(p.kata)),
+    seizoCustom: !!(p.seizo && !(master.seizoByKata[p.kata] || []).includes(p.seizo)),
+    kojiCustom: !!(p.koji && !master.kojiList.includes(p.koji))
+  }));
+  renderPhotoList();
+
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+  document.querySelector('nav.tabs button[data-tab="new"]').classList.add('active');
+  document.querySelectorAll('main section').forEach(s => s.classList.remove('active'));
+  document.getElementById('tab-new').classList.add('active');
+  document.getElementById('fabNew').style.display = 'block';
+
+  updateEditBanner();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function exitEditMode(){
+  editContext = null;
+  updateEditBanner();
+}
+
+function updateEditBanner(){
+  const btn = document.getElementById('submitBtn');
+  let banner = document.getElementById('editBanner');
+  if (editContext) {
+    btn.textContent = '更新して保存';
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'editBanner';
+      banner.style.cssText = 'background:var(--steel-600);border:1px solid var(--amber);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:10px;';
+      banner.innerHTML = '<span>この報告書を編集中です</span><button class="btn btn-outline" id="exitEditBtn" style="padding:6px 10px;font-size:12px;">編集をやめる</button>';
+      document.querySelector('#tab-new .card').parentNode.insertBefore(banner, document.querySelector('#tab-new .card'));
+      document.getElementById('exitEditBtn').addEventListener('click', () => {
+        if (confirm('編集をやめて新規作成に戻りますか？')) { resetForm(); exitEditMode(); }
+      });
+    }
+  } else {
+    btn.textContent = 'Excelを作成';
+    if (banner) banner.remove();
+  }
+}
+
+// "2026年7月13日" -> "2026-07-13"（<input type=date>用）
+function fromJapaneseDate(str){
+  if (!str) return '';
+  const m = String(str).match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (!m) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
 }
 
 async function deleteReport(fileId, siteName){
@@ -797,6 +896,7 @@ async function submitReport(){
     siteName, workContent, workDate,
     companyLine1: company ? company.company1 : '',
     companyLine2: company ? company.company2 : '',
+    editFileId: editContext ? editContext.fileId : undefined,
     photos: photos.map(p => ({
       dataUrl: p.dataUrl,
       shotAt: p.shotAt ? toJapaneseDate(p.shotAt) : '',
@@ -809,10 +909,11 @@ async function submitReport(){
     if (res.ok){
       document.getElementById('resultArea').innerHTML = `
         <div class="result-box">
-          報告書を作成しました。<br>
+          報告書を${editContext ? '更新' : '作成'}しました。<br>
           <a href="${res.downloadUrl}" target="_blank">Excel(.xlsx)をダウンロード</a><br>
           <a href="${res.spreadsheetUrl}" target="_blank">Googleスプレッドシートで開く</a>
         </div>`;
+      exitEditMode();
       loadReports();
     } else {
       toast('作成に失敗しました: ' + (res.error || '不明なエラー'));
@@ -822,7 +923,7 @@ async function submitReport(){
     toast('通信に失敗しました。GAS_URLの設定・公開範囲を確認してください。');
   }finally{
     btn.disabled = false;
-    btn.textContent = 'Excelを作成';
+    btn.textContent = editContext ? '更新して保存' : 'Excelを作成';
   }
 }
 
