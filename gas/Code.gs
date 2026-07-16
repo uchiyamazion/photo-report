@@ -755,9 +755,11 @@ function applyPrintSettings_(blob, sheetPrintRanges) {
     if (!sheetXml) return;
 
     // 1. sheetPrに fitToPage を追加（1ページに収まるよう自動縮小）
-    if (sheetXml.indexOf('<sheetPr>') !== -1) {
+    // 注意: <sheetPr>の子要素は tabColor?, outlinePr?, pageSetUpPr? の順で並んでいる必要があるため、
+    // 必ず</sheetPr>の直前(=末尾)に挿入する。先頭に挿入すると要素順序違反でExcelが破損とみなす。
+    if (sheetXml.indexOf('</sheetPr>') !== -1) {
       if (sheetXml.indexOf('pageSetUpPr') === -1) {
-        sheetXml = sheetXml.replace('<sheetPr>', '<sheetPr><pageSetUpPr fitToPage="1"/>');
+        sheetXml = sheetXml.replace('</sheetPr>', '<pageSetUpPr fitToPage="1"/></sheetPr>');
       }
     } else if (sheetXml.indexOf('<sheetPr/>') !== -1) {
       sheetXml = sheetXml.replace('<sheetPr/>', '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
