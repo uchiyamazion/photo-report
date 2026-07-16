@@ -71,7 +71,7 @@ function doGet(e) {
   } else if (action === 'reports') {
     return jsonOut_(getReportsList_());
   } else if (action === 'reportData') {
-    return jsonOut_(getReportData_(e.parameter.dataFileId));
+    return jsonOut_(getReportData_(e.parameter.fileId));
   }
   return jsonOut_({ error: 'unknown action' });
 }
@@ -265,14 +265,14 @@ function getReportsList_() {
 
   const reports = data.map(r => ({
     fileId: r[0],
-    spreadsheetId: r[1],
+    spreadsheetId: r[1] || '',   // 旧バージョン互換用（新規作成分は空）
     siteName: r[2],
     workDate: r[3],
     createdAt: r[4],
     fileName: r[5],
-    dataFileId: r[6] || '',
+    dataFileId: r[6] || '',      // 旧バージョン互換用（新規作成分は空。編集データはxlsx自体に埋め込み）
     downloadUrl: 'https://drive.google.com/uc?export=download&id=' + r[0],
-    spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/' + r[1] + '/edit'
+    spreadsheetUrl: r[1] ? ('https://docs.google.com/spreadsheets/d/' + r[1] + '/edit') : ''
   }));
   reports.reverse(); // 新しい順
 
@@ -281,12 +281,25 @@ function getReportsList_() {
 
 /**
  * 編集用に、保存済み報告書の元データ(現場情報＋写真)を取得する。
- * body = { dataFileId }
+ * 新方式: xlsxファイル自体に埋め込まれたJSONを取り出す（Driveのファイル数を増やさないため）。
+ * 旧方式: 別ファイル(dataFileId)に保存されていた場合はそちらから取得（後方互換）。
  */
-function getReportData_(dataFileId) {
-  if (!dataFileId) throw new Error('dataFileIdが指定されていません');
-  const text = DriveApp.getFileById(dataFileId).getBlob().getDataAsString('UTF-8');
-  return { ok: true, data: JSON.parse(text) };
+function getReportData_(fileIdOrDataFileId) {
+  if (!fileIdOrDataFileId) throw new Error('fileIdが指定されていません');
+
+  // まずxlsx自体に埋め込まれたデータを試す
+  try {
+    const data = extractEmbeddedReportData_(fileIdOrDataFileId);
+    if (data) return { ok: true, data: data };
+  } catch (e) { /* 埋め込みなし、または旧形式 */ }
+
+  // 旧形式（独立したJSONファイル）を試す
+  try {
+    const text = DriveApp.getFileById(fileIdOrDataFileId).getBlob().getDataAsString('UTF-8');
+    return { ok: true, data: JSON.parse(text) };
+  } catch (e) {
+    throw new Error('編集データが見つかりません(この報告書は編集に対応していない可能性があります)');
+  }
 }
 
 /**
@@ -308,6 +321,7 @@ function deleteReport_(body) {
   }
 
   try { DriveApp.getFileById(body.fileId).setTrashed(true); } catch (e) { /* 既に削除済みなど */ }
+  // 以下は旧バージョンで作成された報告書の後片付け（新規作成分は該当なし）
   if (spreadsheetId) {
     try { DriveApp.getFileById(spreadsheetId).setTrashed(true); } catch (e) { /* 既に削除済みなど */ }
   }
@@ -353,28 +367,29 @@ function generateReport_(body) {
 
   SpreadsheetApp.flush();
 
-  // xlsx としてDriveに保存（画像をセルにぴったり合わせる後処理＋印刷範囲を1ページに固定）
+  // xlsx としてDriveに保存（画像をセルにぴったり合わせる後処理＋印刷範囲を1ページに固定＋編集用データを埋め込み）
   let xlsxBlob = exportAsXlsx_(ss.getId());
   xlsxBlob = stretchImagesToFillCells_(xlsxBlob, placementsBySheetName);
   xlsxBlob = applyPrintSettings_(xlsxBlob, printRangesBySheetName);
+  xlsxBlob = embedReportData_(xlsxBlob, body);
 
   const outFolder = DriveApp.getFolderById(getProps_().getProperty('OUTPUT_FOLDER_ID'));
   const file = outFolder.createFile(xlsxBlob).setName(ss.getName() + '.xlsx');
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-  // 編集時に読み込み直せるよう、送信された元データ(写真含む)をJSONファイルとして保存
-  const dataBlob = Utilities.newBlob(JSON.stringify(body), 'application/json', ss.getName() + '.json');
-  const dataFile = outFolder.createFile(dataBlob);
+  // 中間生成物のGoogleスプレッドシートはもう不要なので破棄（Driveにファイルが増え続けるのを防ぐ）
+  try { DriveApp.getFileById(ss.getId()).setTrashed(true); } catch (e) { /* 失敗しても致命的ではない */ }
 
-  // 報告書一覧に記録（あとで一覧表示・編集・削除できるように）
+  // 報告書一覧に記録（あとで一覧表示・編集・削除できるように）。
+  // xlsx1ファイルで完結する新方式のため、spreadsheetId/dataFileIdは空にしておく（列は後方互換のため維持）。
   ensureReportsSheet_().appendRow([
     file.getId(),
-    ss.getId(),
+    '',
     body.siteName || '',
     body.workDate || '',
     Utilities.formatDate(new Date(), 'JST', 'yyyy-MM-dd HH:mm'),
     file.getName(),
-    dataFile.getId()
+    ''
   ]);
 
   // 編集モード（既存報告書の差し替え）の場合、古いファイルを削除
@@ -384,7 +399,6 @@ function generateReport_(body) {
 
   return {
     ok: true,
-    spreadsheetUrl: ss.getUrl(),
     downloadUrl: 'https://drive.google.com/uc?export=download&id=' + file.getId(),
     fileId: file.getId()
   };
@@ -805,4 +819,30 @@ function applyPrintSettings_(blob, sheetPrintRanges) {
   const newFiles = Object.keys(fileMap).map(name => fileMap[name]);
   const zipped = Utilities.zip(newFiles, 'report.xlsx');
   return zipped.setContentType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+/**
+ * 編集時に読み込み直せるよう、送信された元データ(現場情報＋写真)をxlsxファイル自体に
+ * 追加のzipエントリとして埋め込む。Excel/Google的には未参照の部品なので無視される。
+ * これにより「編集用の別ファイル」をDriveに作らずに済み、Driveのファイル数が増えない。
+ */
+function embedReportData_(blob, dataObj) {
+  const zipBlob = blob.copyBlob().setContentType('application/zip');
+  const files = Utilities.unzip(zipBlob);
+  const jsonBlob = Utilities.newBlob(JSON.stringify(dataObj), 'application/json', 'customData/reportData.json');
+  const newFiles = files.concat([jsonBlob]);
+  const zipped = Utilities.zip(newFiles, 'report.xlsx');
+  return zipped.setContentType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+/**
+ * embedReportData_で埋め込んだ編集用データを取り出す。埋め込みがなければnullを返す。
+ */
+function extractEmbeddedReportData_(fileId) {
+  const blob = DriveApp.getFileById(fileId).getBlob();
+  const zipBlob = blob.copyBlob().setContentType('application/zip');
+  const files = Utilities.unzip(zipBlob);
+  const target = files.filter(f => f.getName() === 'customData/reportData.json')[0];
+  if (!target) return null;
+  return JSON.parse(target.getDataAsString('UTF-8'));
 }

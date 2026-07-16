@@ -464,24 +464,23 @@ function renderReportsList(reports){
         <div class="master-sub">作業日: ${escapeHtml(r.workDate || '-')} ／ 作成: ${escapeHtml(r.createdAt || '-')}</div>
       </div>
       <div class="master-actions" style="flex-direction:column; align-items:flex-end; gap:8px;">
-        <button class="edit-link" style="background:none;border:none;">編集</button>
+        <button class="edit-link js-edit-report" style="background:none;border:none;">編集</button>
         <a href="${r.downloadUrl}" target="_blank" class="edit-link">Excel</a>
-        <a href="${r.spreadsheetUrl}" target="_blank" class="edit-link">Sheet</a>
+        ${r.spreadsheetUrl ? `<a href="${r.spreadsheetUrl}" target="_blank" class="edit-link">Sheet</a>` : ''}
         <button class="photo-remove">削除</button>
       </div>
     `;
-    li.querySelector('.edit-link').addEventListener('click', () => editReport(r));
+    li.querySelector('.js-edit-report').addEventListener('click', () => editReport(r));
     li.querySelector('.photo-remove').addEventListener('click', () => deleteReport(r.fileId, r.siteName));
     ul.appendChild(li);
   });
 }
 
 async function editReport(report){
-  if (!report.dataFileId){ toast('この報告書は編集データが保存されていないため編集できません'); return; }
   if (photos.length > 0 && !confirm('現在入力中の内容は破棄されます。よろしいですか？')) return;
 
   try{
-    const res = await fetch(GAS_URL + '?action=reportData&dataFileId=' + encodeURIComponent(report.dataFileId));
+    const res = await fetch(GAS_URL + '?action=reportData&fileId=' + encodeURIComponent(report.fileId));
     const json = await res.json();
     if (!json.ok){ toast('データの取得に失敗しました: ' + (json.error || '')); return; }
     loadReportIntoForm(json.data, report.fileId);
@@ -910,8 +909,7 @@ async function submitReport(){
       document.getElementById('resultArea').innerHTML = `
         <div class="result-box">
           報告書を${editContext ? '更新' : '作成'}しました。<br>
-          <a href="${res.downloadUrl}" target="_blank">Excel(.xlsx)をダウンロード</a><br>
-          <a href="${res.spreadsheetUrl}" target="_blank">Googleスプレッドシートで開く</a>
+          <a href="${res.downloadUrl}" target="_blank">Excel(.xlsx)をダウンロード</a>
         </div>`;
       exitEditMode();
       loadReports();
