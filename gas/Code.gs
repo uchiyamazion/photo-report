@@ -495,6 +495,10 @@ function buildPhotoSheet_(ss, sheetName, photos, placementsBySheetName) {
         rg.setBorder(true, null, true, null, false, false, '#999999', SpreadsheetApp.BorderStyle.DOTTED);
       });
 
+    // 撮影日時の値だけ中央揃え（元xlsmと同じ）
+    sheet.getRange(shotAtRow, INFO_COL_START, 1, INFO_COL_END - INFO_COL_START + 1)
+      .setHorizontalAlignment('center');
+
     sheet.getRange(labelRow, INFO_COL_START).setValue('撮影日時');
     sheet.getRange(placeLabelRow, INFO_COL_START).setValue('撮影場所');
     sheet.getRange(kojiLabelRow, INFO_COL_START).setValue('工事内容');
