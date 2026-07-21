@@ -90,6 +90,7 @@
   }
   .btn-amber{ background:var(--amber); color:#241a06; }
   .btn-outline{ background:transparent; color:var(--paper); border:1px solid var(--steel-500); }
+  .format-btn.active{ background:var(--amber); color:#241a06; border-color:var(--amber); }
   .btn-danger{ background:transparent; color:var(--danger); border:1px solid var(--danger); }
   .btn-block{ width:100%; }
   .btn:disabled{ opacity:.5; }
@@ -213,6 +214,15 @@
       </div>
     </div>
 
+    <div class="card">
+      <h2>出力形式</h2>
+      <div class="add-row">
+        <button type="button" class="btn btn-outline format-btn active" data-format="excel" style="flex:1;">Excel(.xlsx)</button>
+        <button type="button" class="btn btn-outline format-btn" data-format="pdf" style="flex:1;">PDF</button>
+      </div>
+      <div class="master-sub" style="margin-top:8px;">PDFで出力した報告書は、あとから編集できません。</div>
+    </div>
+
     <div id="resultArea"></div>
   </section>
 
@@ -292,6 +302,7 @@ let editingKata = null;    // { kata, seizo } 編集中の元の値
 let editingKoji = null;    // koji文字列（元の値）
 let editingCompany = null; // { company1, company2 } 編集中の元の値
 let editContext = null;    // { fileId } 保存済み報告書を編集中の場合にセット
+let outputFormat = 'excel'; // 'excel' | 'pdf'
 
 /* ================= 初期化 ================= */
 document.addEventListener('DOMContentLoaded', () => {
@@ -313,12 +324,21 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cancelKojiBtn').addEventListener('click', () => exitEditKoji());
   document.getElementById('cancelCompanyBtn').addEventListener('click', () => exitEditCompany());
   document.getElementById('companySelect').addEventListener('change', toggleCompanyCustomRow);
+  document.querySelectorAll('.format-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.format-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      outputFormat = btn.dataset.format;
+      updateSubmitButtonLabel();
+    });
+  });
 
   const today = new Date();
   document.getElementById('workDate').value = today.toISOString().slice(0,10);
 
   loadMaster();
   loadReports();
+  updateSubmitButtonLabel();
   renderPhotoList();
 });
 
@@ -456,21 +476,22 @@ function renderReportsList(reports){
   empty.style.display = reports.length === 0 ? 'block' : 'none';
 
   reports.forEach(r => {
+    const isPdf = /\.pdf$/i.test(r.fileName || '');
     const li = document.createElement('li');
     li.style.alignItems = 'flex-start';
     li.innerHTML = `
       <div>
-        <div>${escapeHtml(r.siteName || '（物件名なし）')}</div>
+        <div>${escapeHtml(r.siteName || '（物件名なし）')} <span class="master-sub">${isPdf ? '[PDF]' : '[Excel]'}</span></div>
         <div class="master-sub">作業日: ${escapeHtml(r.workDate || '-')} ／ 作成: ${escapeHtml(r.createdAt || '-')}</div>
       </div>
       <div class="master-actions" style="flex-direction:column; align-items:flex-end; gap:8px;">
-        <button class="edit-link js-edit-report" style="background:none;border:none;">編集</button>
-        <a href="${r.downloadUrl}" target="_blank" class="edit-link">Excel</a>
+        ${isPdf ? '' : '<button class="edit-link js-edit-report" style="background:none;border:none;">編集</button>'}
+        <a href="${r.downloadUrl}" target="_blank" class="edit-link">${isPdf ? 'PDF' : 'Excel'}</a>
         ${r.spreadsheetUrl ? `<a href="${r.spreadsheetUrl}" target="_blank" class="edit-link">Sheet</a>` : ''}
         <button class="photo-remove">削除</button>
       </div>
     `;
-    li.querySelector('.js-edit-report').addEventListener('click', () => editReport(r));
+    if (!isPdf) li.querySelector('.js-edit-report').addEventListener('click', () => editReport(r));
     li.querySelector('.photo-remove').addEventListener('click', () => deleteReport(r.fileId, r.siteName));
     ul.appendChild(li);
   });
@@ -536,16 +557,20 @@ function loadReportIntoForm(data, fileId){
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+function updateSubmitButtonLabel(){
+  const btn = document.getElementById('submitBtn');
+  if (editContext) { btn.textContent = '更新して保存'; return; }
+  btn.textContent = outputFormat === 'pdf' ? 'PDFを作成' : 'Excelを作成';
+}
+
 function exitEditMode(){
   editContext = null;
   updateEditBanner();
 }
 
 function updateEditBanner(){
-  const btn = document.getElementById('submitBtn');
   let banner = document.getElementById('editBanner');
   if (editContext) {
-    btn.textContent = '更新して保存';
     if (!banner) {
       banner = document.createElement('div');
       banner.id = 'editBanner';
@@ -557,9 +582,9 @@ function updateEditBanner(){
       });
     }
   } else {
-    btn.textContent = 'Excelを作成';
     if (banner) banner.remove();
   }
+  updateSubmitButtonLabel();
 }
 
 // "2026年7月13日" -> "2026-07-13"（<input type=date>用）
@@ -896,6 +921,7 @@ async function submitReport(){
     companyLine1: company ? company.company1 : '',
     companyLine2: company ? company.company2 : '',
     editFileId: editContext ? editContext.fileId : undefined,
+    outputFormat,
     photos: photos.map(p => ({
       dataUrl: p.dataUrl,
       shotAt: p.shotAt ? toJapaneseDate(p.shotAt) : '',
@@ -906,10 +932,11 @@ async function submitReport(){
   try{
     const res = await postGas(payload);
     if (res.ok){
+      const label = res.format === 'pdf' ? 'PDF' : 'Excel(.xlsx)';
       document.getElementById('resultArea').innerHTML = `
         <div class="result-box">
           報告書を${editContext ? '更新' : '作成'}しました。<br>
-          <a href="${res.downloadUrl}" target="_blank">Excel(.xlsx)をダウンロード</a>
+          <a href="${res.downloadUrl}" target="_blank">${label}をダウンロード</a>
         </div>`;
       exitEditMode();
       loadReports();
@@ -921,7 +948,7 @@ async function submitReport(){
     toast('通信に失敗しました。GAS_URLの設定・公開範囲を確認してください。');
   }finally{
     btn.disabled = false;
-    btn.textContent = editContext ? '更新して保存' : 'Excelを作成';
+    updateSubmitButtonLabel();
   }
 }
 

@@ -367,14 +367,22 @@ function generateReport_(body) {
 
   SpreadsheetApp.flush();
 
-  // xlsx としてDriveに保存（画像をセルにぴったり合わせる後処理＋印刷範囲を1ページに固定＋編集用データを埋め込み）
+  // xlsxを組み立てる（画像をセルにぴったり合わせる後処理＋印刷範囲を1ページに固定）
   let xlsxBlob = exportAsXlsx_(ss.getId());
   xlsxBlob = stretchImagesToFillCells_(xlsxBlob, placementsBySheetName);
   xlsxBlob = applyPrintSettings_(xlsxBlob, printRangesBySheetName);
-  xlsxBlob = embedReportData_(xlsxBlob, body);
 
+  const outputFormat = (body.outputFormat === 'pdf') ? 'pdf' : 'excel';
   const outFolder = DriveApp.getFolderById(getProps_().getProperty('OUTPUT_FOLDER_ID'));
-  const file = outFolder.createFile(xlsxBlob).setName(ss.getName() + '.xlsx');
+
+  let file;
+  if (outputFormat === 'pdf') {
+    const pdfBlob = convertXlsxToPdf_(xlsxBlob);
+    file = outFolder.createFile(pdfBlob).setName(ss.getName() + '.pdf');
+  } else {
+    xlsxBlob = embedReportData_(xlsxBlob, body); // 編集用データはxlsx形式の時だけ埋め込み可能
+    file = outFolder.createFile(xlsxBlob).setName(ss.getName() + '.xlsx');
+  }
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
   // 中間生成物のGoogleスプレッドシートはもう不要なので破棄（Driveにファイルが増え続けるのを防ぐ）
@@ -400,7 +408,8 @@ function generateReport_(body) {
   return {
     ok: true,
     downloadUrl: 'https://drive.google.com/uc?export=download&id=' + file.getId(),
-    fileId: file.getId()
+    fileId: file.getId(),
+    format: outputFormat
   };
 }
 
@@ -608,6 +617,30 @@ function exportAsXlsx_(spreadsheetId) {
     headers: { Authorization: 'Bearer ' + token }
   });
   return response.getBlob();
+}
+
+/**
+ * 完成したxlsx(印刷範囲・1ページ収まる設定を反映済み)をPDFに変換する。
+ * 手順: xlsxを一時的にGoogleスプレッドシートとして変換アップロード→PDFエクスポート→一時ファイルを削除。
+ * xlsxに書き込んだ印刷設定(印刷範囲・fitToPage等)をGoogleが取り込んでくれるため、
+ * そのままPDF化しても表紙1ページ・写真3枚ごとに1ページという体裁を維持できる。
+ *
+ * 事前準備: GASエディタで「サービス」→「Drive API」を追加しておく必要がある（既定のv2のままでOK）。
+ */
+function convertXlsxToPdf_(xlsxBlob) {
+  const resource = { title: '_temp_pdf_' + Utilities.getUuid(), mimeType: MimeType.GOOGLE_SHEETS };
+  const converted = Drive.Files.insert(resource, xlsxBlob, { convert: true });
+  const tempSheetId = converted.id;
+
+  try {
+    const url = 'https://docs.google.com/spreadsheets/d/' + tempSheetId +
+      '/export?format=pdf&size=A4&portrait=true&fitw=true&gridlines=false&printtitle=false&sheetnames=false';
+    const token = ScriptApp.getOAuthToken();
+    const response = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    return response.getBlob().setName('report.pdf');
+  } finally {
+    try { DriveApp.getFileById(tempSheetId).setTrashed(true); } catch (e) { /* 失敗しても致命的ではない */ }
+  }
 }
 
 /**
