@@ -62,6 +62,31 @@ function getProps_() {
   return PropertiesService.getScriptProperties();
 }
 
+/**
+ * ★1回だけ手動実行してください★
+ * 以前のバージョンで作られたまま残っている中間生成物のGoogleスプレッドシート
+ * （名前が「写真報告書_」で始まるもの）をまとめてゴミ箱に移動する。
+ * 現在のバージョンでは、生成のたびに中間スプレッドシートは自動削除されるため、
+ * 今後はこのファイルは増えません（マスタデータのスプレッドシートは対象外です）。
+ *
+ * 実行方法: GASエディタ上部の関数選択で cleanupOrphanedSpreadsheets_ を選び、実行ボタンを押す。
+ * 実行後、実行ログに削除件数が出ます。
+ */
+function cleanupOrphanedSpreadsheets_() {
+  const query = "mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false and name contains '写真報告書_'";
+  const files = DriveApp.searchFiles(query);
+  let count = 0;
+  while (files.hasNext()) {
+    const f = files.next();
+    // 「写真報告書_」で始まるものだけを対象にする（部分一致ではなく前方一致で安全確認）
+    if (f.getName().indexOf('写真報告書_') === 0) {
+      f.setTrashed(true);
+      count++;
+    }
+  }
+  Logger.log('削除した中間スプレッドシート数: ' + count);
+}
+
 // ===================== Web API =====================
 
 function doGet(e) {
