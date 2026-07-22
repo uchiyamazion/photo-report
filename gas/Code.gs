@@ -625,12 +625,29 @@ function exportAsXlsx_(spreadsheetId) {
  * xlsxに書き込んだ印刷設定(印刷範囲・fitToPage等)をGoogleが取り込んでくれるため、
  * そのままPDF化しても表紙1ページ・写真3枚ごとに1ページという体裁を維持できる。
  *
- * 事前準備: GASエディタで「サービス」→「Drive API」を追加しておく必要がある（既定のv2のままでOK）。
+ * 事前準備: GASエディタで「サービス」→「Drive API」を追加しておく必要がある（v2・v3どちらでも動く）。
  */
 function convertXlsxToPdf_(xlsxBlob) {
-  const resource = { title: '_temp_pdf_' + Utilities.getUuid(), mimeType: MimeType.GOOGLE_SHEETS };
-  const converted = Drive.Files.insert(resource, xlsxBlob, { convert: true });
-  const tempSheetId = converted.id;
+  const title = '_temp_pdf_' + Utilities.getUuid();
+  let tempSheetId = null;
+
+  if (typeof Drive !== 'undefined' && Drive.Files) {
+    if (typeof Drive.Files.insert === 'function') {
+      // Drive API v2
+      const resource = { title: title, mimeType: MimeType.GOOGLE_SHEETS };
+      const converted = Drive.Files.insert(resource, xlsxBlob, { convert: true });
+      tempSheetId = converted.id;
+    } else if (typeof Drive.Files.create === 'function') {
+      // Drive API v3
+      const resource = { name: title, mimeType: MimeType.GOOGLE_SHEETS };
+      const converted = Drive.Files.create(resource, xlsxBlob);
+      tempSheetId = converted.id;
+    }
+  }
+
+  if (!tempSheetId) {
+    throw new Error('PDF出力にはDrive APIサービスが必要です。GASエディタ左側の「サービス」(＋)から「Drive API」を追加してから、もう一度お試しください。');
+  }
 
   try {
     const url = 'https://docs.google.com/spreadsheets/d/' + tempSheetId +
