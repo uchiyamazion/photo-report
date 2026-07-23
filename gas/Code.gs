@@ -454,39 +454,62 @@ function buildCoverSheet_(ss, body) {
   for (let r = 2; r <= 33; r++) sheet.setRowHeight(r, r === 7 ? 46 : 31);
 
   const FONT = 'HGP創英ﾌﾟﾚｾﾞﾝｽEB';
+  const NAVY = '#1c3448';
+  const AMBER = '#e8a13c';
 
-  // タイトル「完 了 写 真」
+  // タイトル「完 了 写 真」: 紺地に白文字＋アンバーの太枠で見出し感を強める
   const title = sheet.getRange('E7:H7');
   title.merge();
   title.setValue('完 了 写 真')
-    .setFontFamily(FONT).setFontSize(24)
+    .setFontFamily(FONT).setFontSize(24).setFontColor('#ffffff')
+    .setBackground(NAVY)
     .setHorizontalAlignment('center').setVerticalAlignment('middle')
-    .setBorder(true, true, true, true, false, false);
+    .setBorder(true, true, true, true, false, false, AMBER, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 
-  // 物件名／様
+  // タイトル下にアンバーの帯線を引いてアクセントに
+  sheet.getRange('C9:K9').setBackground(AMBER);
+  sheet.setRowHeight(9, 4);
+
+  // 物件名／様（値の下に下線を引き、記入欄らしく見せる）
   sheet.getRange('C13:D13').merge().setValue('物件名：')
     .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('right');
   sheet.getRange('E13:I13').merge().setValue(body.siteName || '')
-    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('left');
+    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('left')
+    .setBorder(false, false, true, false, false, false, '#999999', SpreadsheetApp.BorderStyle.SOLID);
   sheet.getRange('J13').setValue('様').setFontFamily(FONT).setFontSize(16);
 
   // 作業内容
   sheet.getRange('C15:D15').merge().setValue('作業内容：')
     .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('right').setVerticalAlignment('middle');
   sheet.getRange('E15:J15').merge().setValue(body.workContent || '')
-    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('left').setVerticalAlignment('middle');
+    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('left').setVerticalAlignment('middle')
+    .setBorder(false, false, true, false, false, false, '#999999', SpreadsheetApp.BorderStyle.SOLID);
 
-  // 作業日
+  // 作業日（年月日表記に変換して表示）
   sheet.getRange('C17:D17').merge().setValue('作業日：')
     .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('right').setVerticalAlignment('middle');
-  sheet.getRange('E17:J17').merge().setValue(body.workDate || '')
-    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('left').setVerticalAlignment('middle');
+  sheet.getRange('E17:J17').merge().setValue(toJapaneseDateForSheet_(body.workDate))
+    .setFontFamily(FONT).setFontSize(16).setHorizontalAlignment('left').setVerticalAlignment('middle')
+    .setBorder(false, false, true, false, false, false, '#999999', SpreadsheetApp.BorderStyle.SOLID);
 
-  // 宛先会社（2行）
+  // 宛先会社（2行）。上に区切り線を入れて署名欄のように見せる
+  sheet.getRange('D25:I25').setBorder(false, false, true, false, false, false, '#999999', SpreadsheetApp.BorderStyle.SOLID);
   sheet.getRange('D26:I26').merge().setValue(body.companyLine1 || '')
-    .setFontFamily(FONT).setFontSize(14).setHorizontalAlignment('center').setVerticalAlignment('middle');
+    .setFontFamily(FONT).setFontSize(14).setFontWeight('bold')
+    .setHorizontalAlignment('center').setVerticalAlignment('middle');
   sheet.getRange('D27:I27').merge().setValue(body.companyLine2 || '')
     .setFontFamily(FONT).setFontSize(14).setHorizontalAlignment('center').setVerticalAlignment('middle');
+}
+
+/**
+ * "2026-07-22" のようなISO形式の日付文字列を "2026年7月22日" に変換する。
+ * すでに変換済み・空・不正な形式の場合はそのまま返す。
+ */
+function toJapaneseDateForSheet_(dateStr) {
+  if (!dateStr) return '';
+  const m = String(dateStr).match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!m) return dateStr;
+  return m[1] + '年' + Number(m[2]) + '月' + Number(m[3]) + '日';
 }
 
 /**
@@ -773,7 +796,10 @@ function stretchImagesToFillCells_(blob, placementsBySheetName) {
         if (!p) return whole;
         const toXml = '<xdr:to><xdr:col>' + p.toCol + '</xdr:col><xdr:colOff>0</xdr:colOff>' +
           '<xdr:row>' + p.toRow + '</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>';
-        return '<xdr:twoCellAnchor editAs="oneCell">' + fromXml + toXml + restXml + '</xdr:twoCellAnchor>';
+        // editAs="oneCell"は「セルと一緒に伸縮しない(原寸のまま移動のみ)」という意味になり、
+        // Googleのレンダラーでは画像が枠にフィットせず原寸で配置されてしまう。
+        // 既定(editAs省略=twoCell、セルに合わせて伸縮)にすることで、実際のセル範囲に必ずフィットする。
+        return '<xdr:twoCellAnchor>' + fromXml + toXml + restXml + '</xdr:twoCellAnchor>';
       }
     );
 
