@@ -926,11 +926,15 @@ function applyPrintSettings_(blob, sheetPrintRanges) {
  * 編集時に読み込み直せるよう、送信された元データ(現場情報＋写真)をxlsxファイル自体に
  * 追加のzipエントリとして埋め込む。Excel/Google的には未参照の部品なので無視される。
  * これにより「編集用の別ファイル」をDriveに作らずに済み、Driveのファイル数が増えない。
+ *
+ * 注意: 拡張子は".xml"にしている（中身はJSONテキストのまま）。xlsx内の[Content_Types].xmlには
+ * 既に".xml"の既定コンテンツタイプが登録済みのため、追加の登録なしでそのまま安全に同梱できる。
+ * ".json"のような未登録の拡張子で追加すると、Excelが「内容に問題がある」と検出し破損警告が出る。
  */
 function embedReportData_(blob, dataObj) {
   const zipBlob = blob.copyBlob().setContentType('application/zip');
   const files = Utilities.unzip(zipBlob);
-  const jsonBlob = Utilities.newBlob(JSON.stringify(dataObj), 'application/json', 'customData/reportData.json');
+  const jsonBlob = Utilities.newBlob(JSON.stringify(dataObj), 'application/xml', 'customData/reportData.xml');
   const newFiles = files.concat([jsonBlob]);
   const zipped = Utilities.zip(newFiles, 'report.xlsx');
   return zipped.setContentType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -943,7 +947,7 @@ function extractEmbeddedReportData_(fileId) {
   const blob = DriveApp.getFileById(fileId).getBlob();
   const zipBlob = blob.copyBlob().setContentType('application/zip');
   const files = Utilities.unzip(zipBlob);
-  const target = files.filter(f => f.getName() === 'customData/reportData.json')[0];
+  const target = files.filter(f => f.getName() === 'customData/reportData.xml' || f.getName() === 'customData/reportData.json')[0];
   if (!target) return null;
   return JSON.parse(target.getDataAsString('UTF-8'));
 }
