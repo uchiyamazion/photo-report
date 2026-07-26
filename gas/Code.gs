@@ -55,6 +55,9 @@ function ensureReportsSheet_() {
     sh = ss.insertSheet('報告書一覧');
     sh.appendRow(['fileId', 'spreadsheetId', '物件名', '作業日', '作成日時', 'ファイル名', 'dataFileId']);
   }
+  // D列(作業日)・E列(作成日時)は、日付らしい文字列を書き込むと自動で日付型に変換されて
+  // 後で読み出す際にUTCのタイムスタンプに化けてしまうため、常に文字列として扱うよう固定する。
+  sh.getRange('D:E').setNumberFormat('@');
   return sh;
 }
 
@@ -288,12 +291,16 @@ function getReportsList_() {
   const sh = ensureReportsSheet_();
   const data = sh.getDataRange().getValues().slice(1).filter(r => r[0] !== '');
 
+  // 既に日付型として保存されてしまった過去データを安全に文字列へ戻す
+  const toDateStr = v => (v instanceof Date) ? Utilities.formatDate(v, 'JST', 'yyyy-MM-dd') : v;
+  const toDateTimeStr = v => (v instanceof Date) ? Utilities.formatDate(v, 'JST', 'yyyy-MM-dd HH:mm') : v;
+
   const reports = data.map(r => ({
     fileId: r[0],
     spreadsheetId: r[1] || '',   // 旧バージョン互換用（新規作成分は空）
     siteName: r[2],
-    workDate: r[3],
-    createdAt: r[4],
+    workDate: toDateStr(r[3]),
+    createdAt: toDateTimeStr(r[4]),
     fileName: r[5],
     dataFileId: r[6] || '',      // 旧バージョン互換用（新規作成分は空。編集データはxlsx自体に埋め込み）
     downloadUrl: 'https://drive.google.com/uc?export=download&id=' + r[0],
