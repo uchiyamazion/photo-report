@@ -336,11 +336,30 @@ document.addEventListener('DOMContentLoaded', () => {
   const today = new Date();
   document.getElementById('workDate').value = today.toISOString().slice(0,10);
 
-  loadMaster();
+  loadMaster().then(applyUrlParams);
   loadReports();
   updateSubmitButtonLabel();
   renderPhotoList();
 });
+
+// 工事届出ツール(koji)から開かれたとき、URLパラメータで現場情報を自動入力する
+function applyUrlParams(){
+  const q = new URLSearchParams(location.search);
+  if (![...q.keys()].length) return;
+  const set = (id, k) => { if (q.get(k)) document.getElementById(id).value = q.get(k); };
+  set('siteName', 'site');
+  set('workContent', 'work');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(q.get('date') || '')) document.getElementById('workDate').value = q.get('date');
+  const to = q.get('to');
+  if (to) {
+    const sel = document.getElementById('companySelect');
+    const i = master.companyList.findIndex(c => c.company1 === to);
+    if (i >= 0) sel.value = String(i);
+    else { sel.value = '__custom__'; document.getElementById('companyCustom1').value = to; }
+    toggleCompanyCustomRow();
+  }
+  history.replaceState(null, '', location.pathname);
+}
 
 function initTabs(){
   document.querySelectorAll('nav.tabs button').forEach(btn => {
