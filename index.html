@@ -336,7 +336,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const today = new Date();
   document.getElementById('workDate').value = today.toISOString().slice(0,10);
 
-  loadMaster().then(applyUrlParams);
+  loadMaster().then(restoreDraft).then(applyUrlParams);
+  initDraftAutosave();
   loadReports();
   updateSubmitButtonLabel();
   renderPhotoList();
@@ -910,6 +911,7 @@ function renderPhotoList(){
 
     list.appendChild(div);
   });
+  scheduleDraftSave();
 }
 
 /* ================= 送信 ================= */
@@ -978,6 +980,128 @@ function resetForm(){
   document.getElementById('workContent').value = '';
   document.getElementById('resultArea').innerHTML = '';
   renderPhotoList();
+}
+
+/* ================= 下書き自動保存 (IndexedDB) =================
+   別アプリ/別画面に移ってページが再読み込みされても、写真と入力内容を復元する */
+const DRAFT_DB = 'photo-report-draft';
+let draftReady = false;   // 復元が終わるまで保存しない(空状態での上書き防止)
+let draftTimer;
+
+function draftOpen(){
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open(DRAFT_DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+async function draftTx(mode, fn){
+  const db = await draftOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('kv', mode);
+    const req = fn(tx.objectStore('kv'));
+    tx.oncomplete = () => { db.close(); resolve(req && req.result); };
+    tx.onerror = tx.onabort = () => { db.close(); reject(tx.error); };
+  });
+}
+
+function collectDraft(){
+  const sel = document.getElementById('companySelect');
+  const idx = sel.value;
+  return {
+    siteName: document.getElementById('siteName').value,
+    workContent: document.getElementById('workContent').value,
+    workDate: document.getElementById('workDate').value,
+    company: {
+      mode: idx === '__custom__' ? 'custom' : (idx === '' ? 'none' : 'master'),
+      master: (idx !== '' && idx !== '__custom__') ? master.companyList[Number(idx)] || null : null,
+      custom1: document.getElementById('companyCustom1').value,
+      custom2: document.getElementById('companyCustom2').value
+    },
+    outputFormat,
+    editContext,
+    photos
+  };
+}
+
+function scheduleDraftSave(){
+  if (!draftReady) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveDraftNow, 500);
+}
+
+async function saveDraftNow(){
+  if (!draftReady) return;
+  clearTimeout(draftTimer);
+  try{
+    const d = collectDraft();
+    if (!d.photos.length && !d.siteName && !d.workContent){
+      await draftTx('readwrite', st => st.delete('draft'));
+    } else {
+      await draftTx('readwrite', st => st.put(d, 'draft'));
+    }
+  }catch(err){
+    console.error('下書き保存に失敗', err);
+  }
+}
+
+async function restoreDraft(){
+  try{
+    const d = await draftTx('readonly', st => st.get('draft'));
+    if (d && (d.photos?.length || d.siteName || d.workContent)){
+      document.getElementById('siteName').value = d.siteName || '';
+      document.getElementById('workContent').value = d.workContent || '';
+      if (d.workDate) document.getElementById('workDate').value = d.workDate;
+
+      const c = d.company || {};
+      const sel = document.getElementById('companySelect');
+      if (c.mode === 'custom'){
+        sel.value = '__custom__';
+        document.getElementById('companyCustom1').value = c.custom1 || '';
+        document.getElementById('companyCustom2').value = c.custom2 || '';
+      } else if (c.mode === 'master' && c.master){
+        const i = master.companyList.findIndex(x =>
+          x.company1 === c.master.company1 && x.company2 === c.master.company2);
+        if (i >= 0) sel.value = String(i);
+      }
+      toggleCompanyCustomRow();
+
+      if (d.outputFormat){
+        outputFormat = d.outputFormat;
+        document.querySelectorAll('.format-btn').forEach(b =>
+          b.classList.toggle('active', b.dataset.format === outputFormat));
+        updateSubmitButtonLabel();
+      }
+      editContext = d.editContext || null;
+      photos = Array.isArray(d.photos) ? d.photos : [];
+      renderPhotoList();
+      updateEditBanner();
+      toast('前回の入力内容を復元しました');
+    }
+  }catch(err){
+    console.error('下書き復元に失敗', err);
+  }finally{
+    draftReady = true;
+  }
+}
+
+function initDraftAutosave(){
+  ['siteName','workContent','workDate','companySelect','companyCustom1','companyCustom2']
+    .forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener('input', scheduleDraftSave);
+      el.addEventListener('change', scheduleDraftSave);
+    });
+  // 写真ごとの入力欄(再描画なしで変わる値)も拾う
+  const pl = document.getElementById('photoList');
+  pl.addEventListener('input', scheduleDraftSave);
+  pl.addEventListener('change', scheduleDraftSave);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveDraftNow();
+  });
+  window.addEventListener('pagehide', saveDraftNow);
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
 }
 
 /* ================= 共通 ================= */
