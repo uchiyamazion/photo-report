@@ -93,6 +93,7 @@ function cleanupOrphanedSpreadsheets_() {
 // ===================== Web API =====================
 
 function doGet(e) {
+  const __g = authGuard_(e); if (__g) return __g;
   const action = (e.parameter && e.parameter.action) || 'master';
   if (action === 'master') {
     return jsonOut_(getMasterData_());
@@ -105,6 +106,7 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  const __g = authGuard_(e); if (__g) return __g;
   let body;
   try {
     body = JSON.parse(e.postData.contents);
@@ -957,4 +959,64 @@ function extractEmbeddedReportData_(fileId) {
   const target = files.filter(f => f.getName() === 'customData/reportData.xml' || f.getName() === 'customData/reportData.json')[0];
   if (!target) return null;
   return JSON.parse(target.getDataAsString('UTF-8'));
+}
+
+// ════════════════════════════════════════════════
+// AuthGuard.gs ― Googleログインの本人確認（GAS側）
+// 画面から送られたGoogleのIDトークンを確認し、許可リストにあるアカウントだけを通す。
+//
+// 【設定】Apps Scriptの「プロジェクトの設定 → スクリプト プロパティ」に
+//   ALLOWED_EMAILS = a@gmail.com,b@gmail.com（カンマ区切り）を登録する。未設定のときは全員を拒否する。
+// 【使い方】doGet(e) と doPost(e) の先頭に、次の2行を入れる。
+//   const g = authGuard_(e); if (g) return g;
+// ════════════════════════════════════════════════
+
+const GOOGLE_CLIENT_ID = '782190614995-5d4fur401smd1gpnnvs43h3m2q2q2ar3.apps.googleusercontent.com';
+
+function allowedEmails_() {
+  const v = PropertiesService.getScriptProperties().getProperty('ALLOWED_EMAILS') || '';
+  return v.split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+}
+
+// 戻り値：{ ok:true, email } または { ok:false, reason:'unauthorized' | 'forbidden' }
+function verifyIdToken_(idToken) {
+  if (!idToken) return { ok: false, reason: 'unauthorized' };
+  const cache = CacheService.getScriptCache();
+  const key = 'idt_' + Utilities.base64EncodeWebSafe(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, idToken)).slice(0, 40);
+  let info = null;
+  const hit = cache.get(key);
+  if (hit) { try { info = JSON.parse(hit); } catch (e) { info = null; } }
+  if (!info) {
+    const res = UrlFetchApp.fetch(
+      'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken),
+      { muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) return { ok: false, reason: 'unauthorized' };
+    const r = JSON.parse(res.getContentText());
+    info = { aud: r.aud, iss: r.iss, email: r.email, email_verified: r.email_verified, exp: r.exp };
+    const ttl = Math.min(300, Number(info.exp) - Math.floor(Date.now() / 1000));
+    if (ttl > 0) cache.put(key, JSON.stringify(info), ttl);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const iss = String(info.iss || '');
+  if (info.aud !== GOOGLE_CLIENT_ID) return { ok: false, reason: 'unauthorized' };
+  if (iss !== 'accounts.google.com' && iss !== 'https://accounts.google.com') return { ok: false, reason: 'unauthorized' };
+  if (Number(info.exp) <= now) return { ok: false, reason: 'unauthorized' };
+  if (String(info.email_verified) !== 'true') return { ok: false, reason: 'unauthorized' };
+  const email = String(info.email || '').toLowerCase();
+  if (allowedEmails_().indexOf(email) < 0) return { ok: false, reason: 'forbidden' };
+  return { ok: true, email: email };
+}
+
+// 許可されていれば null、そうでなければエラー応答（JSON）を返す
+function authGuard_(e) {
+  let token = (e && e.parameter && e.parameter.idToken) || '';
+  if (!token && e && e.postData && e.postData.contents) {
+    try { token = (JSON.parse(e.postData.contents) || {}).idToken || ''; } catch (err) { /* JSON以外は無視 */ }
+  }
+  const a = verifyIdToken_(token);
+  if (a.ok) return null;
+  return ContentService.createTextOutput(JSON.stringify({
+    status: 'error', success: false, ok: false, error: a.reason, data: a.reason, message: a.reason
+  })).setMimeType(ContentService.MimeType.JSON);
 }
