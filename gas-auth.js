@@ -38,16 +38,43 @@
       + '<div style="font-size:12.5px;color:#5d6b7c;line-height:1.7;margin-bottom:18px;">許可されたGoogleアカウントでログインします</div>'
       + '<div id="gasauth-btn" style="display:flex;justify-content:center;min-height:44px;"></div>'
       + '<div id="gasauth-msg" style="display:none;color:#c0392b;font-size:12.5px;line-height:1.7;margin-top:14px;"></div>'
+      + '<div id="gasauth-req" style="display:none;margin-top:16px;padding-top:14px;border-top:1px solid #e1e7ef;text-align:left;">'
+      +   '<div style="font-size:12.5px;color:#5d6b7c;margin-bottom:8px;">利用したい場合は、管理者に申請できます。</div>'
+      +   '<input id="gasauth-name" type="text" placeholder="お名前（任意）" maxlength="60" style="width:100%;box-sizing:border-box;padding:11px;border:1px solid #d8e0ea;border-radius:8px;font-size:14px;margin-bottom:8px;">'
+      +   '<button id="gasauth-reqbtn" type="button" style="width:100%;padding:11px;border:0;border-radius:8px;background:#0b6bcb;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">管理者に利用を申請する</button>'
+      +   '<div id="gasauth-reqmsg" style="font-size:12.5px;line-height:1.7;margin-top:10px;color:#1a8a4a;"></div>'
+      + '</div>'
       + '</div>';
     document.body.appendChild(overlay);
     msgEl = overlay.querySelector('#gasauth-msg');
+    overlay.querySelector('#gasauth-reqbtn').onclick = sendRequest;
   }
-  function showLogin(msg){
+  var reqCtx = null;   // 申請に使う、{ url:GASのURL, token:ログイン証明書 }
+  function sendRequest(){
+    if (!reqCtx) return;
+    var btn = overlay.querySelector('#gasauth-reqbtn'), out = overlay.querySelector('#gasauth-reqmsg');
+    btn.disabled = true; out.style.color = '#5d6b7c'; out.textContent = '送信中…';
+    var u = reqCtx.url + '?action=acl_request&name=' + encodeURIComponent(overlay.querySelector('#gasauth-name').value.trim()) + '&idToken=' + encodeURIComponent(reqCtx.token);
+    origFetch(u).then(function(r){ return r.json(); }).then(function(j){
+      var st = j && j.data && j.data.state;
+      if (j && j.status === 'success' && (st === 'requested' || st === 'already_requested')) {
+        out.style.color = '#1a8a4a'; out.innerHTML = '申請しました。管理者が承認するまでお待ちください。<br>承認されたら、この画面を再読み込みしてください。<br><a href="javascript:location.reload()" style="color:#0b6bcb;">再読み込み</a>';
+      } else if (j && j.status === 'success' && st === 'already_allowed') {
+        out.style.color = '#1a8a4a'; out.innerHTML = 'すでに許可されています。<a href="javascript:location.reload()" style="color:#0b6bcb;">再読み込み</a>してください。';
+      } else {
+        out.style.color = '#c0392b'; out.textContent = (j && j.message) || '申請に失敗しました。管理者に直接連絡してください。'; btn.disabled = false;
+      }
+    }).catch(function(){ out.style.color = '#c0392b'; out.textContent = '通信に失敗しました。もう一度お試しください。'; btn.disabled = false; });
+  }
+  function showLogin(msg, canRequest){
     return new Promise(function(resolve){
       waiters.push(resolve);
       var go = function(){
         buildOverlay();
         if (msg) { msgEl.textContent = msg; msgEl.style.display = 'block'; } else { msgEl.style.display = 'none'; }
+        var rb = overlay.querySelector('#gasauth-req');
+        rb.style.display = canRequest ? 'block' : 'none';
+        if (canRequest) { overlay.querySelector('#gasauth-reqbtn').disabled = false; overlay.querySelector('#gasauth-reqmsg').textContent = ''; }
         overlay.style.display = 'flex';
         initGsi();
       };
@@ -106,11 +133,12 @@
     var bad = await authError(res);
     if (bad) {
       var forbidden = (bad === 'forbidden');
+      if (forbidden) reqCtx = { url: url.split('?')[0], token: token };
       clearToken();
       if (forbidden && window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
       await showLogin(forbidden
-        ? 'このアカウントには利用の許可がありません。管理者に許可を依頼するか、別のアカウントでログインしてください'
-        : 'ログインの有効期限が切れました。もう一度ログインしてください');
+        ? 'このアカウントには利用の許可がありません。下から申請するか、別のアカウントでログインしてください'
+        : 'ログインの有効期限が切れました。もう一度ログインしてください', forbidden);
       return gasFetch(input, init);
     }
     return res;
